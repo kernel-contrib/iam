@@ -11,8 +11,14 @@ import (
 // It manages users, tenants (platform → org → branch), memberships, roles,
 // permissions, and invitations.
 type Module struct {
-	ctx  sdk.Context
-	repo *Repository
+	ctx         sdk.Context
+	repo        *Repository
+	users       *UserService
+	tenants     *TenantService
+	members     *MemberService
+	roles       *RoleService
+	invitations *InvitationService
+	onboard     *OnboardService
 }
 
 // New constructs the IAM module.
@@ -67,6 +73,8 @@ func (m *Module) Manifest() sdk.Manifest {
 			// Invitations
 			{Subject: "iam.invitation.created", Description: sdk.T("An invitation was sent")},
 			{Subject: "iam.invitation.accepted", Description: sdk.T("An invitation was accepted")},
+			// Onboarding
+			{Subject: "iam.user.onboarded", Description: sdk.T("A user completed onboarding")},
 		},
 
 		Config: []sdk.ConfigFieldDef{
@@ -103,6 +111,17 @@ func (m *Module) Migrations() fs.FS {
 func (m *Module) Init(ctx sdk.Context) error {
 	m.ctx = ctx
 	m.repo = NewRepository(ctx.DB)
+
+	// Build services bottom-up.
+	m.users = NewUserService(m.repo, ctx.Bus, ctx.Logger)
+	m.tenants = NewTenantService(m.repo, ctx.Bus, ctx.Logger)
+	m.members = NewMemberService(m.repo, ctx.Bus, ctx.Logger)
+	m.roles = NewRoleService(m.repo, ctx.Bus, ctx.Logger, ctx.ValidPermissionKey)
+	m.invitations = NewInvitationService(m.repo, ctx.Bus, ctx.Logger)
+	m.onboard = NewOnboardService(
+		m.users, m.tenants, m.members, m.roles, m.invitations,
+		ctx, ctx.Logger,
+	)
 
 	ctx.Logger.Info("iam module initialized")
 	return nil
