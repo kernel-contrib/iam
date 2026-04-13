@@ -93,6 +93,7 @@ func (s *TenantService) CreateOrg(ctx context.Context, in CreateOrgInput) (*Tena
 		Depth:    platform.Depth + 1,
 		Status:   types.TenantStatusActive,
 	}
+	t.ID = uuid.New()
 	t.Path = buildPath(platform.Path, t.ID.String())
 
 	if err := s.validateDepth(t.Depth); err != nil {
@@ -150,6 +151,7 @@ func (s *TenantService) CreateBranch(ctx context.Context, in CreateBranchInput) 
 		Depth:    org.Depth + 1,
 		Status:   types.TenantStatusActive,
 	}
+	t.ID = uuid.New()
 	t.Path = buildPath(org.Path, t.ID.String())
 
 	if err := s.validateDepth(t.Depth); err != nil {

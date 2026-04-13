@@ -11,7 +11,6 @@ import (
 )
 
 // Re-export types for callers who import only this package.
-
 type TenantType = types.TenantType
 type TenantStatus = types.TenantStatus
 type UserStatus = types.UserStatus
@@ -53,14 +52,22 @@ type User struct {
 	ProviderID   string           `json:"provider_id"        gorm:"not null"`
 	Email        *string          `json:"email,omitempty"`
 	Phone        *string          `json:"phone,omitempty"`
-	Name         json.RawMessage  `json:"name" gorm:"type:jsonb;not null;default:'{}'"`
+	Name         sdk.JSONB        `json:"name" gorm:"type:jsonb;not null;default:'{}'"`
 	PasswordHash *string          `json:"-" gorm:"column:password_hash"`
 	AvatarURL    *string          `json:"avatar_url,omitempty"`
 	Locale       string           `json:"locale"             gorm:"not null;default:en"`
 	Timezone     string           `json:"timezone"             gorm:"not null;default:UTC"`
 	Status       types.UserStatus `json:"status"             gorm:"not null;default:active"`
-	Metadata     json.RawMessage  `json:"metadata,omitempty" gorm:"type:jsonb"`
+	Metadata     sdk.JSONB        `json:"metadata,omitempty" gorm:"type:jsonb"`
 	LastLoginAt  *time.Time       `json:"last_login_at,omitempty"`
+}
+
+// BeforeCreate generates a UUID if not already set (SQLite compat).
+func (u *User) BeforeCreate(_ *gorm.DB) error {
+	if u.ID == uuid.Nil {
+		u.ID = uuid.New()
+	}
+	return nil
 }
 
 // ── Tenant ────────────────────────────────────────────────────────────────────
@@ -77,12 +84,20 @@ type Tenant struct {
 	Path     string             `json:"path"     gorm:"not null"`
 	Depth    int                `json:"depth"    gorm:"not null;default:0"`
 	Status   types.TenantStatus `json:"status"  gorm:"not null;default:active"`
-	Metadata json.RawMessage    `json:"metadata,omitempty" gorm:"type:jsonb"`
+	Metadata sdk.JSONB          `json:"metadata,omitempty" gorm:"type:jsonb"`
 	LogoURL  *string            `json:"logo_url,omitempty"`
 
 	// Associations (not loaded by default)
 	Parent   *Tenant  `json:"parent,omitempty"   gorm:"foreignKey:ParentID"`
 	Children []Tenant `json:"children,omitempty" gorm:"foreignKey:ParentID"`
+}
+
+// BeforeCreate generates a UUID if not already set (SQLite compat).
+func (t *Tenant) BeforeCreate(_ *gorm.DB) error {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
+	return nil
 }
 
 // IsOrg returns true if this tenant is an organization.
@@ -126,6 +141,14 @@ type TenantMember struct {
 	Tenant *Tenant `json:"tenant,omitempty" gorm:"foreignKey:TenantID"`
 }
 
+// BeforeCreate generates a UUID if not already set (SQLite compat).
+func (m *TenantMember) BeforeCreate(_ *gorm.DB) error {
+	if m.ID == uuid.Nil {
+		m.ID = uuid.New()
+	}
+	return nil
+}
+
 // ── Role ──────────────────────────────────────────────────────────────────────
 
 // Role defines a named set of permissions within a tenant.
@@ -141,6 +164,14 @@ type Role struct {
 
 	// Associations
 	Permissions []RolePermission `json:"permissions,omitempty" gorm:"foreignKey:RoleID"`
+}
+
+// BeforeCreate generates a UUID if not already set (SQLite compat).
+func (r *Role) BeforeCreate(_ *gorm.DB) error {
+	if r.ID == uuid.Nil {
+		r.ID = uuid.New()
+	}
+	return nil
 }
 
 // ── Role Permission ───────────────────────────────────────────────────────────

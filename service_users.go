@@ -159,7 +159,7 @@ func (s *UserService) Erase(ctx context.Context, id uuid.UUID) error {
 		"provider_id": hashedStr,
 		"email":       nil,
 		"phone":       nil,
-		"name":        nil,
+		"name":        sdk.JSONB("{}"),
 		"avatar_url":  nil,
 		"metadata":    nil,
 		"status":      UserStatusErased,
