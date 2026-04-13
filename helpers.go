@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -83,4 +85,33 @@ func buildPath(parentPath, id string) string {
 		return "/" + id
 	}
 	return parentPath + "/" + id
+}
+
+// ── Context helpers ───────────────────────────────────────────────────────────
+// These centralize context key extraction so the migration from
+// org_id → tenant_id only requires changes in one place.
+
+// tenantID extracts the tenant (org) UUID from the gin context.
+// Currently reads "org_id" (kernel v0.1.0). Will switch to "tenant_id"
+// once the kernel URL-based tenant routing is released.
+func tenantID(c *gin.Context) uuid.UUID {
+	return get(c, "tenant_id")
+}
+
+// userID extracts the authenticated user's UUID from the gin context.
+func userID(c *gin.Context) uuid.UUID {
+	return get(c, "internal_user_id")
+}
+
+func get(c *gin.Context, key string) uuid.UUID {
+	_id, ok := c.Get(key)
+	if !ok {
+		return uuid.Nil
+	}
+
+	id, ok := _id.(uuid.UUID)
+	if !ok {
+		return uuid.Nil
+	}
+	return id
 }

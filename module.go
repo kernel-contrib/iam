@@ -116,7 +116,7 @@ func (m *Module) Init(ctx sdk.Context) error {
 	m.users = NewUserService(m.repo, ctx.Bus, ctx.Logger)
 	m.tenants = NewTenantService(m.repo, ctx.Bus, ctx.Logger)
 	m.members = NewMemberService(m.repo, ctx.Bus, ctx.Logger)
-	m.roles = NewRoleService(m.repo, ctx.Bus, ctx.Logger, ctx.ValidPermissionKey)
+	m.roles = NewRoleService(m.repo, ctx.Bus, ctx.Logger, ctx.ValidPermissionKey) // TODO: wire ctx.ValidPermissionKey once SDK is updated
 	m.invitations = NewInvitationService(m.repo, ctx.Bus, ctx.Logger)
 	m.onboard = NewOnboardService(
 		m.users, m.tenants, m.members, m.roles, m.invitations,

@@ -80,6 +80,7 @@ type UpdateUserInput struct {
 	Name      *string
 	AvatarURL *string
 	Locale    *string
+	Timezone  *string
 }
 
 // Update patches user fields and publishes iam.user.updated.
@@ -99,6 +100,9 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 	}
 	if in.Locale != nil {
 		updates["locale"] = *in.Locale
+	}
+	if in.Timezone != nil {
+		updates["timezone"] = *in.Timezone
 	}
 	if len(updates) == 0 {
 		return s.repo.FindUserByID(ctx, id)

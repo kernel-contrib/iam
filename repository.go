@@ -232,6 +232,19 @@ func (r *Repository) DeleteMember(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// ListMembershipsByUser returns all memberships (with preloaded Tenant) for a user.
+// Used by the self-service "list my tenants" endpoint.
+func (r *Repository) ListMembershipsByUser(ctx context.Context, userID uuid.UUID) ([]TenantMember, error) {
+	var members []TenantMember
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Preload("Tenant").
+		Find(&members).Error; err != nil {
+		return nil, fmt.Errorf("iam: list memberships by user: %w", err)
+	}
+	return members, nil
+}
+
 // FindMemberInAncestorChain looks for a membership for the given user
 // in the tenant or any of its ancestors. Returns the most-specific
 // (deepest) membership found, or gorm.ErrRecordNotFound if none.

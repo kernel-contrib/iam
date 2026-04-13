@@ -8,6 +8,7 @@ CREATE TABLE users (
     name JSONB NOT NULL DEFAULT '{}',
     avatar_url TEXT,
     locale TEXT NOT NULL DEFAULT 'en',
+    timezone TEXT NOT NULL DEFAULT 'UTC',
     status TEXT NOT NULL DEFAULT 'active',
     metadata JSONB NOT NULL DEFAULT '{}',
     last_login_at TIMESTAMPTZ,

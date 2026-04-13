@@ -119,9 +119,9 @@ func (s *TenantService) CreateOrg(ctx context.Context, in CreateOrgInput) (*Tena
 
 // CreateBranchInput contains the fields for creating a new branch.
 type CreateBranchInput struct {
-	Slug  string
-	Name  string
-	OrgID uuid.UUID // the organization tenant to parent under
+	Slug     string
+	Name     string
+	TenantID uuid.UUID // the organization tenant to parent under
 }
 
 // CreateBranch creates a new branch tenant under an organization.
@@ -130,9 +130,9 @@ func (s *TenantService) CreateBranch(ctx context.Context, in CreateBranchInput) 
 		return nil, sdk.BadRequest(err.Error())
 	}
 
-	org, err := s.repo.FindTenantByID(ctx, in.OrgID)
+	org, err := s.repo.FindTenantByID(ctx, in.TenantID)
 	if isNotFoundErr(err) {
-		return nil, sdk.NotFound("organization", in.OrgID)
+		return nil, sdk.NotFound("organization", in.TenantID)
 	}
 	if err != nil {
 		return nil, err
@@ -142,7 +142,7 @@ func (s *TenantService) CreateBranch(ctx context.Context, in CreateBranchInput) 
 	}
 
 	t := &Tenant{
-		ParentID: &in.OrgID,
+		ParentID: &in.TenantID,
 		Slug:     in.Slug,
 		Name:     in.Name,
 		Type:     types.TenantTypeBranch,

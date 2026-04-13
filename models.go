@@ -57,6 +57,7 @@ type User struct {
 	PasswordHash *string          `json:"-" gorm:"column:password_hash"`
 	AvatarURL    *string          `json:"avatar_url,omitempty"`
 	Locale       string           `json:"locale"             gorm:"not null;default:en"`
+	Timezone     string           `json:"timezone"             gorm:"not null;default:UTC"`
 	Status       types.UserStatus `json:"status"             gorm:"not null;default:active"`
 	Metadata     json.RawMessage  `json:"metadata,omitempty" gorm:"type:jsonb"`
 	LastLoginAt  *time.Time       `json:"last_login_at,omitempty"`

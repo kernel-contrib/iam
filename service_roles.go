@@ -304,13 +304,18 @@ func (s *RoleService) ResolvePermissions(ctx context.Context, userID, tenantID u
 }
 
 // HasPermission checks if a user has a specific permission in a tenant context.
+// Supports the wildcard "*" permission (full access).
 func (s *RoleService) HasPermission(ctx context.Context, userID, tenantID uuid.UUID, perm string) (bool, error) {
 	perms, err := s.ResolvePermissions(ctx, userID, tenantID)
 	if err != nil {
 		return false, err
 	}
-	ps := sdk.NewPermissionSet(perms)
-	return ps.Has(perm), nil
+	for _, p := range perms {
+		if p == "*" || p == perm {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ── internal ──────────────────────────────────────────────────────────────────

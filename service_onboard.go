@@ -60,8 +60,8 @@ type OnboardInput struct {
 	InvitationToken *string
 
 	// Fields for creating a new org (used when no invitation is provided).
-	OrgName    string
-	OrgSlug    string
+	TenantName string
+	TenantSlug string
 	PlatformID uuid.UUID // the platform tenant ID to parent new orgs under
 }
 
@@ -110,13 +110,13 @@ func (s *OnboardService) Execute(ctx context.Context, in OnboardInput) (*Onboard
 	}
 
 	// 4. No invitation — create a new organization.
-	if in.OrgSlug == "" || in.OrgName == "" {
+	if in.TenantSlug == "" || in.TenantName == "" {
 		return nil, sdk.BadRequest("org_name and org_slug are required when onboarding without an invitation")
 	}
 
 	org, err := s.tenants.CreateOrg(ctx, CreateOrgInput{
-		Slug:       in.OrgSlug,
-		Name:       in.OrgName,
+		Slug:       in.TenantSlug,
+		Name:       in.TenantName,
 		PlatformID: in.PlatformID,
 	})
 	if err != nil {
