@@ -12,14 +12,15 @@ import (
 
 // TenantService provides business logic for tenant hierarchy operations.
 type TenantService struct {
-	repo *Repository
-	bus  sdk.EventBus
-	log  *slog.Logger
+	repo  *Repository
+	bus   sdk.EventBus
+	hooks *sdk.HookRegistry
+	log   *slog.Logger
 }
 
 // NewTenantService constructs a TenantService.
-func NewTenantService(repo *Repository, bus sdk.EventBus, log *slog.Logger) *TenantService {
-	return &TenantService{repo: repo, bus: bus, log: log}
+func NewTenantService(repo *Repository, bus sdk.EventBus, hooks *sdk.HookRegistry, log *slog.Logger) *TenantService {
+	return &TenantService{repo: repo, bus: bus, hooks: hooks, log: log}
 }
 
 // ── Query ─────────────────────────────────────────────────────────────────────
@@ -209,6 +210,7 @@ func (s *TenantService) Update(ctx context.Context, id uuid.UUID, in UpdateTenan
 
 // Deactivate soft-deletes a tenant and all its children.
 // Platform tenants cannot be deactivated.
+// Fires before.iam.tenant.deactivate (abortable) and after.iam.tenant.deactivate hooks.
 func (s *TenantService) Deactivate(ctx context.Context, id uuid.UUID) error {
 	t, err := s.repo.FindTenantByID(ctx, id)
 	if isNotFoundErr(err) {
@@ -220,6 +222,16 @@ func (s *TenantService) Deactivate(ctx context.Context, id uuid.UUID) error {
 
 	if t.IsPlatform() {
 		return sdk.BadRequest("cannot deactivate the platform tenant")
+	}
+
+	// Let other modules block this deactivation.
+	if s.hooks != nil {
+		if err := s.hooks.FireBefore(ctx, "before.iam.tenant.deactivate", t); err != nil {
+			if ae, ok := sdk.IsAbortError(err); ok {
+				return ae.Reason
+			}
+			return err
+		}
 	}
 
 	// Cascade deactivate children first.
@@ -241,6 +253,11 @@ func (s *TenantService) Deactivate(ctx context.Context, id uuid.UUID) error {
 		"tenant_id": id,
 		"type":      t.Type,
 	})
+
+	// Notify other modules after deactivation (cannot abort).
+	if s.hooks != nil {
+		s.hooks.FireAfter(ctx, "after.iam.tenant.deactivate", t)
+	}
 
 	return nil
 }

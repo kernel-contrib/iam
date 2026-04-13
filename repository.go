@@ -303,6 +303,18 @@ func (r *Repository) FindSystemRoles(ctx context.Context, tenantID uuid.UUID) ([
 	return roles, nil
 }
 
+// FindRoleBySlugAndTenant looks up a role by its slug within a specific tenant.
+// Used during idempotent provisioning to find pre-existing system roles.
+func (r *Repository) FindRoleBySlugAndTenant(ctx context.Context, slug string, tenantID uuid.UUID) (*Role, error) {
+	var role Role
+	if err := r.db.WithContext(ctx).
+		Where("slug = ? AND tenant_id = ?", slug, tenantID).
+		First(&role).Error; err != nil {
+		return nil, fmt.Errorf("iam: find role by slug: %w", err)
+	}
+	return &role, nil
+}
+
 func (r *Repository) CreateRole(ctx context.Context, role *Role) error {
 	if err := r.db.WithContext(ctx).Create(role).Error; err != nil {
 		return fmt.Errorf("iam: create role: %w", err)

@@ -9,20 +9,26 @@ import (
 	"go.edgescale.dev/kernel/sdk"
 )
 
+// ProvisionFn seeds system roles for a new tenant and returns the admin role.
+// Injected into OnboardService so both onboarding and kernel-provisioning
+// hooks share the same logic (defined in provision.go).
+type ProvisionFn func(ctx context.Context, tenantID uuid.UUID) (*Role, error)
+
 // OnboardService orchestrates user onboarding.
 // Given an authenticated identity (from the IdP), it:
 //  1. Finds or creates the User record.
 //  2. If an invitation token is provided, accepts it (joins existing tenant).
 //  3. Otherwise, creates a new organization for the user.
 type OnboardService struct {
-	users   *UserService
-	tenants *TenantService
-	members *MemberService
-	roles   *RoleService
-	invites *InvitationService
-	bus     sdk.EventBus
-	log     *slog.Logger
-	ctx     sdk.Context // module context for DB access (invitation acceptance needs tx)
+	users       *UserService
+	tenants    *TenantService
+	members    *MemberService
+	roles      *RoleService
+	invites    *InvitationService
+	provision  ProvisionFn
+	bus        sdk.EventBus
+	log        *slog.Logger
+	ctx        sdk.Context // module context for DB access (invitation acceptance needs tx)
 }
 
 // NewOnboardService constructs an OnboardService.
@@ -32,18 +38,20 @@ func NewOnboardService(
 	members *MemberService,
 	roles *RoleService,
 	invites *InvitationService,
+	provision ProvisionFn,
 	sdkCtx sdk.Context,
 	log *slog.Logger,
 ) *OnboardService {
 	return &OnboardService{
-		users:   users,
-		tenants: tenants,
-		members: members,
-		roles:   roles,
-		invites: invites,
-		bus:     sdkCtx.Bus,
-		ctx:     sdkCtx,
-		log:     log,
+		users:     users,
+		tenants:   tenants,
+		members:   members,
+		roles:     roles,
+		invites:   invites,
+		provision: provision,
+		bus:       sdkCtx.Bus,
+		ctx:       sdkCtx,
+		log:       log,
 	}
 }
 
@@ -173,10 +181,10 @@ func (s *OnboardService) findOrCreateUser(ctx context.Context, in OnboardInput) 
 	return user, true, nil
 }
 
-// seedAndAssignAdmin creates the default system roles for a new org
-// and assigns the "admin" role to the founding member.
-func (s *OnboardService) seedAndAssignAdmin(ctx context.Context, orgID, founderMemberID uuid.UUID) error {
-	adminRole, err := s.seedSystemRoles(ctx, orgID)
+// seedAndAssignAdmin delegates to the shared ProvisionFn to seed system
+// roles and then assigns the admin role to the founding member.
+func (s *OnboardService) seedAndAssignAdmin(ctx context.Context, tenantID, founderMemberID uuid.UUID) error {
+	adminRole, err := s.provision(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("iam: onboard: seed roles: %w", err)
 	}
@@ -186,67 +194,6 @@ func (s *OnboardService) seedAndAssignAdmin(ctx context.Context, orgID, founderM
 	}
 
 	return nil
-}
-
-// seedSystemRoles creates the default system roles for a tenant.
-// Returns the admin role (used to assign to the founder).
-func (s *OnboardService) seedSystemRoles(ctx context.Context, tenantID uuid.UUID) (*Role, error) {
-	systemRoles := []struct {
-		Name        string
-		Slug        string
-		Description string
-		Permissions []string
-	}{
-		{
-			Name:        "Admin",
-			Slug:        "admin",
-			Description: "Full access to all resources",
-			Permissions: []string{"*"},
-		},
-		{
-			Name:        "Manager",
-			Slug:        "manager",
-			Description: "Manage members and view all resources",
-			Permissions: []string{
-				"iam.tenants.read", "iam.members.read", "iam.members.manage",
-				"iam.roles.read", "iam.invitations.read", "iam.invitations.manage",
-			},
-		},
-		{
-			Name:        "Member",
-			Slug:        "member",
-			Description: "Basic access to tenant resources",
-			Permissions: []string{
-				"iam.tenants.read", "iam.members.read",
-			},
-		},
-	}
-
-	var adminRole *Role
-
-	for _, sr := range systemRoles {
-		desc := sr.Description
-		role := &Role{
-			TenantID:    tenantID,
-			Name:        sr.Name,
-			Slug:        sr.Slug,
-			Description: &desc,
-			IsSystem:    true,
-		}
-		if err := s.roles.repo.CreateRole(ctx, role); err != nil {
-			return nil, fmt.Errorf("iam: seed role %s: %w", sr.Slug, err)
-		}
-
-		if err := s.roles.repo.SetRolePermissions(ctx, role.ID, sr.Permissions); err != nil {
-			return nil, fmt.Errorf("iam: seed role permissions %s: %w", sr.Slug, err)
-		}
-
-		if sr.Slug == "admin" {
-			adminRole = role
-		}
-	}
-
-	return adminRole, nil
 }
 
 func (s *OnboardService) publish(ctx context.Context, subject string, payload map[string]any) {
