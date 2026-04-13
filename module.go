@@ -113,16 +113,24 @@ func (m *Module) Init(ctx sdk.Context) error {
 	m.repo = NewRepository(ctx.DB)
 
 	// Build services bottom-up.
-	m.users = NewUserService(m.repo, ctx.Bus, ctx.Logger)
-	m.tenants = NewTenantService(m.repo, ctx.Bus, nil, ctx.Logger) // hooks set in RegisterHooks()
-	m.members = NewMemberService(m.repo, ctx.Bus, ctx.Logger)
-	m.roles = NewRoleService(m.repo, ctx.Bus, ctx.Logger, ctx.ValidPermissionKey) // TODO: wire ctx.ValidPermissionKey once SDK is updated
+	m.users = NewUserService(m.repo, ctx.Bus, ctx.Redis, ctx.Logger)
+	m.tenants = NewTenantService(m.repo, ctx.Bus, ctx.Hooks, ctx.Logger) // hooks set in RegisterHooks()
+	m.members = NewMemberService(m.repo, ctx.Bus, ctx.Redis, ctx.Logger)
+	m.roles = NewRoleService(m.repo, ctx.Bus, ctx.Redis, ctx.Logger, ctx.ValidPermissionKey)
 	m.invitations = NewInvitationService(m.repo, ctx.Bus, ctx.Logger)
 	m.onboard = NewOnboardService(
 		m.users, m.tenants, m.members, m.roles, m.invitations,
 		m.seedSystemRoles, // shared provisioning logic (provision.go)
 		ctx, ctx.Logger,
 	)
+
+	// Register the reader for cross-module consumption.
+	// Other modules resolve it via: sdk.Reader[iam.IAMReader](&m.ctx, "iam")
+	ctx.RegisterReader(&iamReader{
+		repo:  m.repo,
+		roles: m.roles,
+		redis: ctx.Redis,
+	})
 
 	ctx.Logger.Info("iam module initialized")
 	return nil

@@ -10,14 +10,15 @@ import (
 
 // MemberService provides business logic for tenant membership operations.
 type MemberService struct {
-	repo *Repository
-	bus  sdk.EventBus
-	log  *slog.Logger
+	repo  *Repository
+	bus   sdk.EventBus
+	redis sdk.NamespacedRedis
+	log   *slog.Logger
 }
 
 // NewMemberService constructs a MemberService.
-func NewMemberService(repo *Repository, bus sdk.EventBus, log *slog.Logger) *MemberService {
-	return &MemberService{repo: repo, bus: bus, log: log}
+func NewMemberService(repo *Repository, bus sdk.EventBus, redis sdk.NamespacedRedis, log *slog.Logger) *MemberService {
+	return &MemberService{repo: repo, bus: bus, redis: redis, log: log}
 }
 
 // ── Query ─────────────────────────────────────────────────────────────────────
@@ -89,6 +90,7 @@ func (s *MemberService) Add(ctx context.Context, in AddMemberInput) (*TenantMemb
 		return nil, err
 	}
 
+	s.invalidateMember(ctx, in.UserID, in.TenantID)
 	s.publish(ctx, "iam.member.added", map[string]any{
 		"member_id": m.ID,
 		"user_id":   in.UserID,
@@ -124,6 +126,7 @@ func (s *MemberService) Remove(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 
+	s.invalidateMember(ctx, m.UserID, m.TenantID)
 	s.publish(ctx, "iam.member.removed", map[string]any{
 		"member_id": id,
 		"user_id":   m.UserID,
@@ -140,4 +143,13 @@ func (s *MemberService) publish(ctx context.Context, subject string, payload map
 		return
 	}
 	s.bus.Publish(ctx, subject, payload)
+}
+
+func (s *MemberService) invalidateMember(ctx context.Context, userID, tenantID uuid.UUID) {
+	if s.redis.Client() == nil {
+		return
+	}
+	_ = sdk.Invalidate(ctx, s.redis, "member:"+userID.String()+":"+tenantID.String())
+	// Also invalidate permission cache for this user+tenant.
+	_ = sdk.Invalidate(ctx, s.redis, "perms:"+userID.String()+":"+tenantID.String())
 }

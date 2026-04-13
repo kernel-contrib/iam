@@ -13,14 +13,15 @@ import (
 
 // UserService provides business logic for user lifecycle operations.
 type UserService struct {
-	repo *Repository
-	bus  sdk.EventBus
-	log  *slog.Logger
+	repo  *Repository
+	bus   sdk.EventBus
+	redis sdk.NamespacedRedis
+	log   *slog.Logger
 }
 
 // NewUserService constructs a UserService.
-func NewUserService(repo *Repository, bus sdk.EventBus, log *slog.Logger) *UserService {
-	return &UserService{repo: repo, bus: bus, log: log}
+func NewUserService(repo *Repository, bus sdk.EventBus, redis sdk.NamespacedRedis, log *slog.Logger) *UserService {
+	return &UserService{repo: repo, bus: bus, redis: redis, log: log}
 }
 
 // ── Query ─────────────────────────────────────────────────────────────────────
@@ -116,6 +117,7 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 		return nil, err
 	}
 
+	s.invalidateUser(ctx, id)
 	s.publish(ctx, "iam.user.updated", map[string]any{"user_id": id})
 	return u, nil
 }
@@ -132,6 +134,7 @@ func (s *UserService) Suspend(ctx context.Context, id uuid.UUID) (*User, error) 
 		return nil, err
 	}
 
+	s.invalidateUser(ctx, id)
 	s.publish(ctx, "iam.user.suspended", map[string]any{"user_id": id})
 	return u, nil
 }
@@ -165,6 +168,7 @@ func (s *UserService) Erase(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 
+	s.invalidateUser(ctx, id)
 	s.publish(ctx, "iam.user.erased", map[string]any{"user_id": id})
 	return nil
 }
@@ -184,4 +188,14 @@ func (s *UserService) publish(ctx context.Context, subject string, payload map[s
 		return
 	}
 	s.bus.Publish(ctx, subject, payload)
+}
+
+func (s *UserService) invalidateUser(ctx context.Context, id uuid.UUID) {
+	if s.redis.Client() == nil {
+		return
+	}
+	_ = sdk.Invalidate(ctx, s.redis, "user:"+id.String())
+	// Also invalidate external ID lookup — we don't have it here,
+	// so use prefix invalidation for safety.
+	_ = sdk.InvalidatePrefix(ctx, s.redis, "user:ext:")
 }

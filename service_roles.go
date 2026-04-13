@@ -14,6 +14,7 @@ import (
 type RoleService struct {
 	repo             *Repository
 	bus              sdk.EventBus
+	redis            sdk.NamespacedRedis
 	log              *slog.Logger
 	validPermissions func(string) bool // validates permission keys from all modules
 }
@@ -22,12 +23,14 @@ type RoleService struct {
 func NewRoleService(
 	repo *Repository,
 	bus sdk.EventBus,
+	redis sdk.NamespacedRedis,
 	log *slog.Logger,
 	validPermissions func(string) bool,
 ) *RoleService {
 	return &RoleService{
 		repo:             repo,
 		bus:              bus,
+		redis:            redis,
 		log:              log,
 		validPermissions: validPermissions,
 	}
@@ -180,7 +183,14 @@ func (s *RoleService) SetPermissions(ctx context.Context, roleID uuid.UUID, keys
 		}
 	}
 
-	return s.repo.SetRolePermissions(ctx, roleID, keys)
+	if err := s.repo.SetRolePermissions(ctx, roleID, keys); err != nil {
+		return err
+	}
+
+	// Invalidate permission caches — we don't know which users have this role,
+	// so clear all permission caches.
+	s.invalidateAllPermissions(ctx)
+	return nil
 }
 
 // ── Role Assignment ───────────────────────────────────────────────────────────
@@ -214,12 +224,27 @@ func (s *RoleService) AssignToMember(ctx context.Context, memberID, roleID uuid.
 		}
 		return err
 	}
+
+	// Invalidate the member's permission cache.
+	if member != nil {
+		s.invalidatePermissions(ctx, member.UserID, member.TenantID)
+	}
 	return nil
 }
 
 // RevokeFromMember removes a role from a member.
 func (s *RoleService) RevokeFromMember(ctx context.Context, memberID, roleID uuid.UUID) error {
-	return s.repo.RevokeRole(ctx, memberID, roleID)
+	// Look up the member to get user/tenant for cache invalidation.
+	member, _ := s.repo.FindMember(ctx, memberID)
+
+	if err := s.repo.RevokeRole(ctx, memberID, roleID); err != nil {
+		return err
+	}
+
+	if member != nil {
+		s.invalidatePermissions(ctx, member.UserID, member.TenantID)
+	}
+	return nil
 }
 
 // ── RBAC Resolution ───────────────────────────────────────────────────────────
@@ -325,4 +350,18 @@ func (s *RoleService) publish(ctx context.Context, subject string, payload map[s
 		return
 	}
 	s.bus.Publish(ctx, subject, payload)
+}
+
+func (s *RoleService) invalidatePermissions(ctx context.Context, userID, tenantID uuid.UUID) {
+	if s.redis.Client() == nil {
+		return
+	}
+	_ = sdk.Invalidate(ctx, s.redis, "perms:"+userID.String()+":"+tenantID.String())
+}
+
+func (s *RoleService) invalidateAllPermissions(ctx context.Context) {
+	if s.redis.Client() == nil {
+		return
+	}
+	_ = sdk.InvalidatePrefix(ctx, s.redis, "perms:")
 }
