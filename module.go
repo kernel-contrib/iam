@@ -3,7 +3,7 @@ package iam
 import (
 	"io/fs"
 
-	"go.edgescale.dev/kernel-contrib/iam/migrations"
+	"github.com/kernel-contrib/iam/migrations"
 	"go.edgescale.dev/kernel/sdk"
 )
 
