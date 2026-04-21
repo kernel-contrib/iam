@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	iam "github.com/kernel-contrib/iam"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	iam "go.edgescale.dev/kernel-contrib/iam"
 	"go.edgescale.dev/kernel/sdk"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.edgescale.dev/kernel-contrib/iam/types"
+	"github.com/kernel-contrib/iam/types"
 	"go.edgescale.dev/kernel/sdk"
 	"gorm.io/gorm"
 )

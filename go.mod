@@ -1,4 +1,4 @@
-module go.edgescale.dev/kernel-contrib/iam
+module github.com/kernel-contrib/iam
 
 go 1.26.1
 
