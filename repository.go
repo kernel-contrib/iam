@@ -485,6 +485,82 @@ func (r *Repository) ListInvitations(ctx context.Context, tenantID uuid.UUID, pa
 	)
 }
 
+// ── Tenant Auth Config ────────────────────────────────────────────────────────
+
+// ListAuthConfig returns all auth provider configs for a tenant.
+func (r *Repository) ListAuthConfig(ctx context.Context, tenantID uuid.UUID) ([]TenantAuthConfig, error) {
+	var configs []TenantAuthConfig
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("provider_name ASC").
+		Find(&configs).Error; err != nil {
+		return nil, fmt.Errorf("iam: list auth config: %w", err)
+	}
+	return configs, nil
+}
+
+// ListEnabledProviders returns the names of enabled auth providers for a tenant.
+// Returns an empty slice if no config exists (meaning all providers are allowed).
+func (r *Repository) ListEnabledProviders(ctx context.Context, tenantID uuid.UUID) ([]string, error) {
+	var names []string
+	if err := r.db.WithContext(ctx).
+		Model(&TenantAuthConfig{}).
+		Where("tenant_id = ? AND is_enabled = ?", tenantID, true).
+		Pluck("provider_name", &names).Error; err != nil {
+		return nil, fmt.Errorf("iam: list enabled providers: %w", err)
+	}
+	return names, nil
+}
+
+// UpsertAuthConfig creates or updates a provider config for a tenant.
+func (r *Repository) UpsertAuthConfig(ctx context.Context, cfg *TenantAuthConfig) error {
+	result := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND provider_name = ?", cfg.TenantID, cfg.ProviderName).
+		Assign(map[string]any{
+			"is_enabled": cfg.IsEnabled,
+			"config":     cfg.Config,
+		}).
+		FirstOrCreate(cfg)
+	if result.Error != nil {
+		return fmt.Errorf("iam: upsert auth config: %w", result.Error)
+	}
+	return nil
+}
+
+// DeleteAuthConfig removes a provider config entry for a tenant.
+func (r *Repository) DeleteAuthConfig(ctx context.Context, tenantID uuid.UUID, providerName string) error {
+	result := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND provider_name = ?", tenantID, providerName).
+		Delete(&TenantAuthConfig{})
+	if result.Error != nil {
+		return fmt.Errorf("iam: delete auth config: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// SetAuthConfig replaces the entire provider allowlist for a tenant atomically.
+// If providers is empty, all existing configs are removed (open access).
+func (r *Repository) SetAuthConfig(ctx context.Context, tenantID uuid.UUID, providers []TenantAuthConfig) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete all existing configs for this tenant.
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&TenantAuthConfig{}).Error; err != nil {
+			return fmt.Errorf("iam: clear auth config: %w", err)
+		}
+
+		// Insert new configs.
+		for i := range providers {
+			providers[i].TenantID = tenantID
+			if err := tx.Create(&providers[i]).Error; err != nil {
+				return fmt.Errorf("iam: set auth config: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // parsePath splits a materialized path like "/{id1}/{id2}" into a slice

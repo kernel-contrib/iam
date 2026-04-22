@@ -243,3 +243,27 @@ func (inv *Invitation) BeforeCreate(_ *gorm.DB) error {
 	}
 	return nil
 }
+
+// ── Tenant Auth Config ────────────────────────────────────────────────────────
+
+// TenantAuthConfig maps a tenant to an allowed identity provider.
+// If no rows exist for a tenant, all providers are permitted (open by default).
+// Once the first row is added, it becomes an allowlist — only listed providers
+// are accepted for that tenant.
+type TenantAuthConfig struct {
+	ID           uuid.UUID `json:"id"            gorm:"type:uuid;primaryKey"`
+	TenantID     uuid.UUID `json:"tenant_id"     gorm:"type:uuid;not null"`
+	ProviderName string    `json:"provider_name" gorm:"not null"`
+	IsEnabled    bool      `json:"is_enabled"    gorm:"not null;default:true"`
+	Config       sdk.JSONB `json:"config,omitempty" gorm:"type:jsonb"`
+	CreatedAt    time.Time `json:"created_at"    gorm:"autoCreateTime"`
+	UpdatedAt    time.Time `json:"updated_at"    gorm:"autoUpdateTime"`
+}
+
+// BeforeCreate generates a new UUID if one has not been set already.
+func (c *TenantAuthConfig) BeforeCreate(_ *gorm.DB) error {
+	if c.ID == uuid.Nil {
+		c.ID = uuid.New()
+	}
+	return nil
+}
