@@ -2,14 +2,14 @@ package iam
 
 import "go.edgescale.dev/kernel/sdk"
 
-// RegisterRoutes mounts all HTTP endpoints on the kernel router.
+// RouteHandlers mounts all HTTP endpoints on the kernel router.
 // Routes are split into two groups:
 //   - Global: authenticated self-service (/v1/iam/...)
 //   - Tenant-scoped: require tenant context (/v1/:tenant_id/iam/...)
 //
 // NOTE: Once the kernel is updated with URL-based tenant routing (Phase 0),
 // tenant-scoped routes will use `router.Tenant()` instead of the full path.
-func (m *Module) RegisterRoutes(router *sdk.Router) []sdk.RouteHandler {
+func (m *Module) RouteHandlers() []sdk.RouteHandler {
 	return []sdk.RouteHandler{
 		{
 			Type: sdk.RouteClient, Register: m.registerClientRoutes,
@@ -22,8 +22,8 @@ func (m *Module) registerClientRoutes(router *sdk.Router) {
 	// Permissions catalog (all module permissions).
 	router.GET("/permissions", "iam.permissions.read", m.handleListPermissions)
 
-	// Onboarding — public endpoint.
-	router.POST("/onboard", "public", m.handleOnboard)
+	// Onboarding - self-service endpoint.
+	router.POST("/onboard", sdk.Self, m.handleOnboard)
 
 	// Self-service profile.
 	router.GET("/me", "self", m.handleGetMe)
@@ -76,5 +76,9 @@ func (m *Module) registerClientRoutes(router *sdk.Router) {
 	t.POST("/invitations", "iam.invitations.manage", m.handleCreateInvitation)
 	t.GET("/invitations/:id", "iam.invitations.read", m.handleGetInvitation)
 	t.DELETE("/invitations/:id", "iam.invitations.manage", m.handleRevokeInvitation)
+
+	// Auth providers (per-tenant IdP configuration).
+	t.GET("/auth-providers", "iam.tenants.manage", m.handleListAuthProviders)
+	t.PUT("/auth-providers", "iam.tenants.manage", m.handleSetAuthProviders)
 
 }

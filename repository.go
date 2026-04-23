@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -483,6 +484,101 @@ func (r *Repository) ListInvitations(ctx context.Context, tenantID uuid.UUID, pa
 		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
 		page,
 	)
+}
+
+// ── Tenant Auth Config ────────────────────────────────────────────────────────
+
+// ListAuthConfig returns all auth provider configs for a tenant.
+func (r *Repository) ListAuthConfig(ctx context.Context, tenantID uuid.UUID) ([]TenantAuthConfig, error) {
+	var configs []TenantAuthConfig
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("provider_name ASC").
+		Find(&configs).Error; err != nil {
+		return nil, fmt.Errorf("iam: list auth config: %w", err)
+	}
+	return configs, nil
+}
+
+// ListEnabledProviders returns the names of enabled auth providers for a tenant.
+// Returns an empty slice if no config exists (meaning all providers are allowed).
+func (r *Repository) ListEnabledProviders(ctx context.Context, tenantID uuid.UUID) ([]string, error) {
+	var names []string
+	if err := r.db.WithContext(ctx).
+		Model(&TenantAuthConfig{}).
+		Where("tenant_id = ? AND is_enabled = ?", tenantID, true).
+		Pluck("provider_name", &names).Error; err != nil {
+		return nil, fmt.Errorf("iam: list enabled providers: %w", err)
+	}
+	return names, nil
+}
+
+// upsertAuthConfigTx creates or restores a single TenantAuthConfig within an
+// existing transaction (or plain DB handle). If a row already exists (active
+// or soft-deleted) it is updated in-place; otherwise a new row is inserted.
+func upsertAuthConfigTx(db *gorm.DB, cfg *TenantAuthConfig) error {
+	var existing TenantAuthConfig
+	err := db.Unscoped().
+		Where("tenant_id = ? AND provider_name = ?", cfg.TenantID, cfg.ProviderName).
+		First(&existing).Error
+	if err == nil {
+		// Record found (possibly soft-deleted) — restore and reconfigure it.
+		return db.Unscoped().Model(&existing).Updates(map[string]any{
+			"is_enabled": cfg.IsEnabled,
+			"config":     cfg.Config,
+			"deleted_at": nil,
+		}).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return db.Create(cfg).Error
+}
+
+// UpsertAuthConfig creates or updates a provider config for a tenant.
+// If a soft-deleted record exists for the same (tenant_id, provider_name), it is
+// restored and reconfigured instead of creating a new row.
+func (r *Repository) UpsertAuthConfig(ctx context.Context, cfg *TenantAuthConfig) error {
+	if err := upsertAuthConfigTx(r.db.WithContext(ctx), cfg); err != nil {
+		return fmt.Errorf("iam: upsert auth config: %w", err)
+	}
+	return nil
+}
+
+// DeleteAuthConfig removes a provider config entry for a tenant.
+func (r *Repository) DeleteAuthConfig(ctx context.Context, tenantID uuid.UUID, providerName string) error {
+	result := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND provider_name = ?", tenantID, providerName).
+		Delete(&TenantAuthConfig{})
+	if result.Error != nil {
+		return fmt.Errorf("iam: delete auth config: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// SetAuthConfig replaces the entire provider allowlist for a tenant atomically.
+// If providers is empty, all existing configs are removed (open access).
+// Soft-deleted rows for the same (tenant_id, provider_name) are restored rather
+// than creating duplicate rows.
+func (r *Repository) SetAuthConfig(ctx context.Context, tenantID uuid.UUID, providers []TenantAuthConfig) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Soft-delete all active configs for this tenant.
+		if err := tx.Where("tenant_id = ?", tenantID).Delete(&TenantAuthConfig{}).Error; err != nil {
+			return fmt.Errorf("iam: clear auth config: %w", err)
+		}
+
+		// Upsert each provider, restoring any previously soft-deleted row.
+		for i := range providers {
+			providers[i].TenantID = tenantID
+			if err := upsertAuthConfigTx(tx, &providers[i]); err != nil {
+				return fmt.Errorf("iam: set auth config: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

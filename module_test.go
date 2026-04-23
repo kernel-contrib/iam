@@ -80,6 +80,17 @@ func newTestDB(t *testing.T) *gorm.DB {
 			expires_at DATETIME NOT NULL, accepted_at DATETIME,
 			created_at DATETIME, updated_at DATETIME
 		)`,
+		`CREATE TABLE tenant_auth_configs (
+			id TEXT PRIMARY KEY,
+			created_at DATETIME, updated_at DATETIME, deleted_at DATETIME,
+			tenant_id TEXT NOT NULL,
+			provider_name TEXT NOT NULL,
+			is_enabled INTEGER NOT NULL DEFAULT 1,
+			config BLOB
+		)`,
+		`CREATE UNIQUE INDEX uq_tenant_auth_configs_tenant_provider_active
+			ON tenant_auth_configs(tenant_id, provider_name)
+			WHERE deleted_at IS NULL`,
 	}
 
 	for _, stmt := range ddl {
@@ -773,4 +784,100 @@ func TestTenantMetadata(t *testing.T) {
 	var result map[string]string
 	require.NoError(t, tenant.GetMetadata(&result))
 	assert.Equal(t, "tech", result["industry"])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Auth Provider Config Tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+func TestAuthConfig_SetAndList(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+	platform := h.createPlatform(t)
+
+	// Empty list → open access (no rows).
+	err := h.repo.SetAuthConfig(ctx, platform.ID, nil)
+	require.NoError(t, err)
+	configs, err := h.repo.ListAuthConfig(ctx, platform.ID)
+	require.NoError(t, err)
+	assert.Empty(t, configs)
+
+	// Set two providers.
+	err = h.repo.SetAuthConfig(ctx, platform.ID, []iam.TenantAuthConfig{
+		{ProviderName: "google", IsEnabled: true},
+		{ProviderName: "github", IsEnabled: true},
+	})
+	require.NoError(t, err)
+	configs, err = h.repo.ListAuthConfig(ctx, platform.ID)
+	require.NoError(t, err)
+	assert.Len(t, configs, 2)
+
+	// Replace with empty → open access again.
+	err = h.repo.SetAuthConfig(ctx, platform.ID, nil)
+	require.NoError(t, err)
+	configs, err = h.repo.ListAuthConfig(ctx, platform.ID)
+	require.NoError(t, err)
+	assert.Empty(t, configs)
+}
+
+func TestAuthConfig_UndeleteOnReAdd(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+	platform := h.createPlatform(t)
+
+	// Add "google".
+	err := h.repo.SetAuthConfig(ctx, platform.ID, []iam.TenantAuthConfig{
+		{ProviderName: "google", IsEnabled: true},
+	})
+	require.NoError(t, err)
+
+	// Soft-delete it (replace with empty list).
+	err = h.repo.SetAuthConfig(ctx, platform.ID, nil)
+	require.NoError(t, err)
+	configs, err := h.repo.ListAuthConfig(ctx, platform.ID)
+	require.NoError(t, err)
+	assert.Empty(t, configs, "provider should be soft-deleted")
+
+	// Re-add "google" — should restore the soft-deleted row, not create a new one.
+	err = h.repo.SetAuthConfig(ctx, platform.ID, []iam.TenantAuthConfig{
+		{ProviderName: "google", IsEnabled: false},
+	})
+	require.NoError(t, err)
+
+	configs, err = h.repo.ListAuthConfig(ctx, platform.ID)
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	assert.Equal(t, "google", configs[0].ProviderName)
+	assert.False(t, configs[0].IsEnabled, "should reflect the reconfigured value")
+}
+
+func TestAuthConfig_UpsertRestoresSoftDeleted(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+	platform := h.createPlatform(t)
+
+	// Add via Upsert.
+	err := h.repo.UpsertAuthConfig(ctx, &iam.TenantAuthConfig{
+		TenantID:     platform.ID,
+		ProviderName: "azure",
+		IsEnabled:    true,
+	})
+	require.NoError(t, err)
+
+	// Soft-delete the "azure" provider (SetAuthConfig with empty).
+	require.NoError(t, h.repo.SetAuthConfig(ctx, platform.ID, nil))
+
+	// Upsert "azure" again — must restore it, not create a duplicate.
+	err = h.repo.UpsertAuthConfig(ctx, &iam.TenantAuthConfig{
+		TenantID:     platform.ID,
+		ProviderName: "azure",
+		IsEnabled:    false,
+	})
+	require.NoError(t, err)
+
+	configs, err := h.repo.ListAuthConfig(ctx, platform.ID)
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	assert.Equal(t, "azure", configs[0].ProviderName)
+	assert.False(t, configs[0].IsEnabled)
 }

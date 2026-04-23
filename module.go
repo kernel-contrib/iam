@@ -75,6 +75,8 @@ func (m *Module) Manifest() sdk.Manifest {
 			{Subject: "iam.invitation.accepted", Description: sdk.T("An invitation was accepted")},
 			// Onboarding
 			{Subject: "iam.user.onboarded", Description: sdk.T("A user completed onboarding")},
+			// Auth providers
+			{Subject: "iam.tenant.auth_config.updated", Description: sdk.T("A tenant's allowed auth providers were updated")},
 		},
 
 		Config: []sdk.ConfigFieldDef{

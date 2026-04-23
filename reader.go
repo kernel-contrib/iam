@@ -15,6 +15,7 @@ const (
 	cacheTenantTTL     = 10 * time.Minute
 	cacheMemberTTL     = 5 * time.Minute
 	cachePermissionTTL = 3 * time.Minute
+	cacheAuthCfgTTL    = 5 * time.Minute
 )
 
 // ── Reader interface ──────────────────────────────────────────────────────────
@@ -48,6 +49,12 @@ type IAMReader interface {
 	// ── Permissions ───────────────────────────────────────────────────
 	ResolvePermissions(ctx context.Context, userID, tenantID uuid.UUID) ([]string, error)
 	HasPermission(ctx context.Context, userID, tenantID uuid.UUID, perm string) (bool, error)
+
+	// ── Auth Providers ───────────────────────────────────────────────
+	// GetAllowedProviders returns the list of enabled auth provider names
+	// for a tenant. An empty slice means all providers are allowed.
+	// Used by the kernel's resolveUser middleware for policy enforcement.
+	GetAllowedProviders(ctx context.Context, tenantID uuid.UUID) ([]string, error)
 }
 
 // ── Implementation ────────────────────────────────────────────────────────────
@@ -161,4 +168,16 @@ func (r *iamReader) HasPermission(ctx context.Context, userID, tenantID uuid.UUI
 		}
 	}
 	return false, nil
+}
+
+// ── Auth Providers ────────────────────────────────────────────────────────────
+
+func (r *iamReader) GetAllowedProviders(ctx context.Context, tenantID uuid.UUID) ([]string, error) {
+	if r.redis.Client() == nil {
+		return r.repo.ListEnabledProviders(ctx, tenantID)
+	}
+	key := "authcfg:" + tenantID.String()
+	return sdk.Cache(ctx, r.redis, key, cacheAuthCfgTTL, func() ([]string, error) {
+		return r.repo.ListEnabledProviders(ctx, tenantID)
+	})
 }
