@@ -190,7 +190,7 @@ func (m *Module) handleGetRolePermissions(c *gin.Context) {
 
 // handleAssignRole assigns a role to a member.
 func (m *Module) handleAssignRole(c *gin.Context) {
-	memberID, err := parseUUID(c, "member_id")
+	memberID, err := parseUUID(c, "id")
 	if err != nil {
 		return
 	}
@@ -219,7 +219,7 @@ func (m *Module) handleAssignRole(c *gin.Context) {
 
 // handleRevokeRole removes a role from a member.
 func (m *Module) handleRevokeRole(c *gin.Context) {
-	memberID, err := parseUUID(c, "member_id")
+	memberID, err := parseUUID(c, "id")
 	if err != nil {
 		return
 	}
@@ -244,7 +244,7 @@ func (m *Module) handleRevokeRole(c *gin.Context) {
 
 // handleGetMemberRoles returns all roles assigned to a member.
 func (m *Module) handleGetMemberRoles(c *gin.Context) {
-	memberID, err := parseUUID(c, "member_id")
+	memberID, err := parseUUID(c, "id")
 	if err != nil {
 		return
 	}

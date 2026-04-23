@@ -56,9 +56,9 @@ func (m *Module) registerClientRoutes(router *sdk.Router) {
 	t.DELETE("/members/:id", "iam.members.manage", m.handleRemoveMember)
 
 	// Member role assignments.
-	t.GET("/members/:member_id/roles", "iam.roles.read", m.handleGetMemberRoles)
-	t.POST("/members/:member_id/roles", "iam.roles.manage", m.handleAssignRole)
-	t.DELETE("/members/:member_id/roles/:role_id", "iam.roles.manage", m.handleRevokeRole)
+	t.GET("/members/:id/roles", "iam.roles.read", m.handleGetMemberRoles)
+	t.POST("/members/:id/roles", "iam.roles.manage", m.handleAssignRole)
+	t.DELETE("/members/:id/roles/:role_id", "iam.roles.manage", m.handleRevokeRole)
 
 	// Roles.
 	t.GET("/roles", "iam.roles.read", m.handleListRoles)
