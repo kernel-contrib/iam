@@ -1,7 +1,6 @@
 package iam
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Re-export types for callers who import only this package.
+// Re-export enum types for callers who import only this package.
 type TenantType = types.TenantType
 type TenantStatus = types.TenantStatus
 type UserStatus = types.UserStatus
@@ -42,176 +41,16 @@ const (
 	RBACModeAdditive = types.RBACModeAdditive
 )
 
-// ── User ──────────────────────────────────────────────────────────────────────
-
-// User represents an identity from an external IdP (Firebase, Azure AD, etc.).
-// Users are global — not scoped to any single tenant.
-type User struct {
-	sdk.BaseModel
-	Provider     string           `json:"provider"           gorm:"not null"`
-	ProviderID   string           `json:"provider_id"        gorm:"not null"`
-	Email        *string          `json:"email,omitempty"`
-	Phone        *string          `json:"phone,omitempty"`
-	Name         sdk.JSONB        `json:"name" gorm:"type:jsonb;not null;default:'{}'"`
-	PasswordHash *string          `json:"-" gorm:"column:password_hash"`
-	AvatarURL    *string          `json:"avatar_url,omitempty"`
-	Locale       string           `json:"locale"             gorm:"not null;default:en"`
-	Timezone     string           `json:"timezone"             gorm:"not null;default:UTC"`
-	Status       types.UserStatus `json:"status"             gorm:"not null;default:active"`
-	Metadata     sdk.JSONB        `json:"metadata,omitempty" gorm:"type:jsonb"`
-	LastLoginAt  *time.Time       `json:"last_login_at,omitempty"`
-}
-
-// BeforeCreate generates a UUID if not already set (SQLite compat).
-func (u *User) BeforeCreate(_ *gorm.DB) error {
-	if u.ID == uuid.Nil {
-		u.ID = uuid.New()
-	}
-	return nil
-}
-
-// ── Tenant ────────────────────────────────────────────────────────────────────
-
-// Tenant represents a node in the multi-level hierarchy:
-// platform → organization → branch.
-// The materialized path column enables efficient ancestor/descendant queries.
-type Tenant struct {
-	sdk.BaseModel
-	ParentID *uuid.UUID         `json:"parent_id,omitempty" gorm:"type:uuid"`
-	Slug     string             `json:"slug"     gorm:"not null"`
-	Name     string             `json:"name"     gorm:"not null"`
-	Type     types.TenantType   `json:"type"     gorm:"not null"`
-	Path     string             `json:"path"     gorm:"not null"`
-	Depth    int                `json:"depth"    gorm:"not null;default:0"`
-	Status   types.TenantStatus `json:"status"  gorm:"not null;default:active"`
-	Metadata sdk.JSONB          `json:"metadata,omitempty" gorm:"type:jsonb"`
-	LogoURL  *string            `json:"logo_url,omitempty"`
-
-	// Associations (not loaded by default)
-	Parent   *Tenant  `json:"parent,omitempty"   gorm:"foreignKey:ParentID"`
-	Children []Tenant `json:"children,omitempty" gorm:"foreignKey:ParentID"`
-}
-
-// BeforeCreate generates a UUID if not already set (SQLite compat).
-func (t *Tenant) BeforeCreate(_ *gorm.DB) error {
-	if t.ID == uuid.Nil {
-		t.ID = uuid.New()
-	}
-	return nil
-}
-
-// IsOrg returns true if this tenant is an organization.
-func (t *Tenant) IsOrg() bool { return t.Type == types.TenantTypeOrganization }
-
-// IsBranch returns true if this tenant is a branch.
-func (t *Tenant) IsBranch() bool { return t.Type == types.TenantTypeBranch }
-
-// IsPlatform returns true if this tenant is the platform root.
-func (t *Tenant) IsPlatform() bool { return t.Type == types.TenantTypePlatform }
-
-// GetMetadata unmarshals the JSONB metadata into the target.
-func (t *Tenant) GetMetadata(target any) error {
-	if t.Metadata == nil {
-		return nil
-	}
-	return json.Unmarshal(t.Metadata, target)
-}
-
-// SetMetadata marshals the source into JSONB metadata.
-func (t *Tenant) SetMetadata(src any) error {
-	data, err := json.Marshal(src)
-	if err != nil {
-		return err
-	}
-	t.Metadata = data
-	return nil
-}
-
-// ── Tenant Member ─────────────────────────────────────────────────────────────
-
-// TenantMember links a user to a tenant with a membership status.
-type TenantMember struct {
-	sdk.BaseModel
-	UserID   uuid.UUID          `json:"user_id"   gorm:"type:uuid;not null"`
-	TenantID uuid.UUID          `json:"tenant_id" gorm:"type:uuid;not null"`
-	Status   types.MemberStatus `json:"status"    gorm:"not null;default:active"`
-
-	// Associations
-	User   *User   `json:"user,omitempty"   gorm:"foreignKey:UserID"`
-	Tenant *Tenant `json:"tenant,omitempty" gorm:"foreignKey:TenantID"`
-}
-
-// BeforeCreate generates a UUID if not already set (SQLite compat).
-func (m *TenantMember) BeforeCreate(_ *gorm.DB) error {
-	if m.ID == uuid.Nil {
-		m.ID = uuid.New()
-	}
-	return nil
-}
-
-// ── Role ──────────────────────────────────────────────────────────────────────
-
-// Role defines a named set of permissions within a tenant.
-// System roles (is_system=true) are seeded during provisioning and cannot
-// be modified or deleted by tenant admins.
-type Role struct {
-	sdk.BaseModel
-	TenantID    uuid.UUID `json:"tenant_id"   gorm:"type:uuid;not null"`
-	Name        string    `json:"name"        gorm:"not null"`
-	Slug        string    `json:"slug"        gorm:"not null"`
-	Description *string   `json:"description,omitempty"`
-	IsSystem    bool      `json:"is_system"   gorm:"not null;default:false"`
-
-	// Associations
-	Permissions []RolePermission `json:"permissions,omitempty" gorm:"foreignKey:RoleID"`
-}
-
-// BeforeCreate generates a UUID if not already set (SQLite compat).
-func (r *Role) BeforeCreate(_ *gorm.DB) error {
-	if r.ID == uuid.Nil {
-		r.ID = uuid.New()
-	}
-	return nil
-}
-
-// ── Role Permission ───────────────────────────────────────────────────────────
-
-// RolePermission maps a single permission key to a role.
-type RolePermission struct {
-	ID            uuid.UUID `json:"id"             gorm:"type:uuid;primaryKey"`
-	RoleID        uuid.UUID `json:"role_id"        gorm:"type:uuid;not null"`
-	PermissionKey string    `json:"permission_key" gorm:"not null"`
-	CreatedAt     time.Time `json:"created_at"     gorm:"autoCreateTime"`
-}
-
-// BeforeCreate generates a new UUID if one has not been set already.
-func (rp *RolePermission) BeforeCreate(_ *gorm.DB) error {
-	if rp.ID == uuid.Nil {
-		rp.ID = uuid.New()
-	}
-	return nil
-}
-
-// ── Member Role ───────────────────────────────────────────────────────────────
-
-// MemberRole assigns a role to a tenant member.
-type MemberRole struct {
-	ID        uuid.UUID `json:"id"        gorm:"type:uuid;primaryKey"`
-	MemberID  uuid.UUID `json:"member_id" gorm:"type:uuid;not null"`
-	RoleID    uuid.UUID `json:"role_id"   gorm:"type:uuid;not null"`
-	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
-
-	// Associations
-	Role *Role `json:"role,omitempty" gorm:"foreignKey:RoleID"`
-}
-
-// BeforeCreate generates a new UUID if one has not been set already.
-func (mr *MemberRole) BeforeCreate(_ *gorm.DB) error {
-	if mr.ID == uuid.Nil {
-		mr.ID = uuid.New()
-	}
-	return nil
-}
+// Type aliases for backward compatibility.
+// Existing code that references iam.User, iam.Tenant, etc. continues to work
+// without any changes. Consumer modules that need these types without importing
+// the root iam package can use github.com/kernel-contrib/iam/types directly.
+type User = types.User
+type Tenant = types.Tenant
+type TenantMember = types.TenantMember
+type Role = types.Role
+type RolePermission = types.RolePermission
+type MemberRole = types.MemberRole
 
 // ── Invitation ────────────────────────────────────────────────────────────────
 
