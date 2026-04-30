@@ -202,6 +202,27 @@ func (r *Repository) FindMemberByUserAndTenant(ctx context.Context, userID, tena
 	return &m, nil
 }
 
+// FindMembersByIDs returns tenant members for the given primary-key IDs with
+// their associated User preloaded. IDs that do not match any active member
+// are silently omitted from the result map.
+func (r *Repository) FindMembersByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]TenantMember, error) {
+	if len(ids) == 0 {
+		return map[uuid.UUID]TenantMember{}, nil
+	}
+	var members []TenantMember
+	if err := r.db.WithContext(ctx).
+		Where("id IN ?", ids).
+		Preload("User").
+		Find(&members).Error; err != nil {
+		return nil, fmt.Errorf("iam: find members by ids: %w", err)
+	}
+	result := make(map[uuid.UUID]TenantMember, len(members))
+	for _, m := range members {
+		result[m.ID] = m
+	}
+	return result, nil
+}
+
 func (r *Repository) ListMembers(ctx context.Context, tenantID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[TenantMember], error) {
 	return sdk.Paginate[TenantMember](
 		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Preload("User"),
