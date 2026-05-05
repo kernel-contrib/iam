@@ -71,7 +71,8 @@ func (s *UserService) Create(ctx context.Context, in CreateUserInput) (*User, er
 		u.Metadata = sdk.JSONB(in.Metadata)
 	}
 	if in.Name != nil {
-		u.Name = sdk.JSONB(*in.Name)
+		nameJSON, _ := json.Marshal(map[string]string{"base": *in.Name})
+		u.Name = sdk.JSONB(nameJSON)
 	}
 	if in.Locale != nil {
 		u.Locale = *in.Locale
@@ -116,7 +117,8 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 		updates["phone"] = *in.Phone
 	}
 	if in.Name != nil {
-		updates["name"] = sdk.JSONB(*in.Name)
+		nameJSON, _ := json.Marshal(map[string]string{"base": *in.Name})
+		updates["name"] = sdk.JSONB(nameJSON)
 	}
 	if in.AvatarURL != nil {
 		updates["avatar_url"] = *in.AvatarURL

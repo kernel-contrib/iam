@@ -280,7 +280,7 @@ func TestUserUpdate(t *testing.T) {
 	newName := "Jane Doe"
 	updated, err := h.users.Update(ctx, user.ID, iam.UpdateUserInput{Name: &newName})
 	require.NoError(t, err)
-	assert.Equal(t, "Jane Doe", string(updated.Name))
+	assert.JSONEq(t, `{"base":"Jane Doe"}`, string(updated.Name))
 }
 
 func TestUserSuspend(t *testing.T) {
