@@ -116,7 +116,7 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 		updates["phone"] = *in.Phone
 	}
 	if in.Name != nil {
-		updates["name"] = *in.Name
+		updates["name"] = sdk.JSONB(*in.Name)
 	}
 	if in.AvatarURL != nil {
 		updates["avatar_url"] = *in.AvatarURL
