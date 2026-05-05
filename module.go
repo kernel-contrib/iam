@@ -1,15 +1,27 @@
 package iam
 
 import (
+	"context"
+	"fmt"
 	"io/fs"
+	"time"
 
 	"github.com/edgescaleDev/kernel/sdk"
+	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/migrations"
 )
 
 // Module is the EdgeScale Kernel core module for Identity and Access Management.
 // It manages users, tenants (platform → org → branch), memberships, roles,
 // permissions, and invitations.
+// platformCacheKey is the Redis key used to cache the platform tenant ID.
+const platformCacheKey = "platform_tenant_id"
+
+// platformCacheTTL is a safety-net expiry. Under normal operation the cache
+// is warmed during provisioning, so this TTL only guards against stale data
+// if someone manually edits the DB.
+const platformCacheTTL = 24 * time.Hour
+
 type Module struct {
 	ctx          sdk.Context
 	repo         *Repository
@@ -141,4 +153,37 @@ func (m *Module) Init(ctx sdk.Context) error {
 // Shutdown performs any cleanup required before the kernel stops.
 func (m *Module) Shutdown() error {
 	return nil
+}
+
+// platformTenantID lazily resolves the platform tenant's UUID.
+//
+// Resolution order:
+//  1. Redis cache (module:iam:platform_tenant_id).
+//  2. Database query (SELECT ... WHERE type = 'platform' LIMIT 1).
+//
+// On a cache miss the result is stored in Redis with platformCacheTTL.
+// Returns a clear error if no platform tenant has been created yet.
+func (m *Module) platformTenantID(ctx context.Context) (uuid.UUID, error) {
+	// 1. Try Redis.
+	if m.ctx.Redis.Client() != nil {
+		if val, err := m.ctx.Redis.Get(ctx, platformCacheKey).Result(); err == nil {
+			id, parseErr := uuid.Parse(val)
+			if parseErr == nil {
+				return id, nil
+			}
+		}
+	}
+
+	// 2. Query the database.
+	platform, err := m.repo.FindPlatformTenant(ctx)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("iam: platform tenant not found; create one with type='platform' and run 'tenant provision': %w", err)
+	}
+
+	// 3. Warm the cache for subsequent requests.
+	if m.ctx.Redis.Client() != nil {
+		m.ctx.Redis.Set(ctx, platformCacheKey, platform.ID.String(), platformCacheTTL)
+	}
+
+	return platform.ID, nil
 }

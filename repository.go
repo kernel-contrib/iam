@@ -83,6 +83,14 @@ func (r *Repository) SoftDeleteUser(ctx context.Context, id uuid.UUID) error {
 
 // ── Tenants ───────────────────────────────────────────────────────────────────
 
+func (r *Repository) FindPlatformTenant(ctx context.Context) (*Tenant, error) {
+	var t Tenant
+	if err := r.db.WithContext(ctx).Where("type = ?", TenantTypePlatform).First(&t).Error; err != nil {
+		return nil, fmt.Errorf("iam: find platform tenant: %w", err)
+	}
+	return &t, nil
+}
+
 func (r *Repository) FindTenantByID(ctx context.Context, id uuid.UUID) (*Tenant, error) {
 	var t Tenant
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&t).Error; err != nil {

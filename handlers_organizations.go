@@ -35,8 +35,7 @@ func (m *Module) handleCreateOrganization(c *gin.Context) {
 		return
 	}
 
-	// Resolve platform_id from kernel context.
-	pid, err := platformIDFromContext(c)
+	pid, err := m.platformTenantID(c.Request.Context())
 	if err != nil {
 		sdk.FromError(c, err)
 		return

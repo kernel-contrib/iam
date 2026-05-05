@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	goslug "github.com/gosimple/slug"
@@ -141,20 +140,6 @@ func authProviderID(c *gin.Context) string {
 		}
 	}
 	return ""
-}
-
-// platformIDFromContext extracts the platform tenant UUID from the gin context.
-// Returns a typed error if the value is missing or the wrong type.
-func platformIDFromContext(c *gin.Context) (uuid.UUID, error) {
-	v, ok := c.Get("platform_id")
-	if !ok {
-		return uuid.Nil, sdk.Internal("platform_id not available in context")
-	}
-	id, ok := v.(uuid.UUID)
-	if !ok {
-		return uuid.Nil, sdk.Internal("platform_id has unexpected type in context")
-	}
-	return id, nil
 }
 
 func getUUID(c *gin.Context, key string) uuid.UUID {
