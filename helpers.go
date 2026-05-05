@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	goslug "github.com/gosimple/slug"
 	"go.edgescale.dev/kernel/sdk"
 	"gorm.io/gorm"
 )
@@ -45,6 +46,20 @@ func validateSlug(slug string) error {
 		return fmt.Errorf("slug must be 3-63 lowercase alphanumeric characters or hyphens, starting and ending with alphanumeric")
 	}
 	return nil
+}
+
+// slugify converts a human-readable name into a valid slug using Unicode
+// transliteration. Handles Arabic, CJK, Cyrillic, and other scripts.
+// Examples:
+//   - "My Company (UK)" -> "my-company-uk"
+//   - "شركة أكمي"       -> "shrkt-akmy"
+func slugify(name string) string {
+	s := goslug.Make(name)
+	if len(s) > 63 {
+		s = s[:63]
+		s = strings.TrimRight(s, "-")
+	}
+	return s
 }
 
 // ── Error helpers ─────────────────────────────────────────────────────────────

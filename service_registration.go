@@ -132,6 +132,8 @@ type CreateOrgForUserInput struct {
 	PlatformID uuid.UUID // resolved from kernel config
 	Name       string
 	Slug       string
+	LogoURL    *string // optional, URL or storage UUID
+	Metadata   *string // optional, raw JSON
 }
 
 // CreateOrgOutput returns the new tenant, membership, and admin role.
@@ -145,20 +147,25 @@ type CreateOrgOutput struct {
 // the founding user as a member with the admin role.
 // All steps run in a single transaction to prevent orphaned resources.
 func (s *RegistrationService) CreateOrganization(ctx context.Context, in CreateOrgForUserInput) (*CreateOrgOutput, error) {
-	if err := validateSlug(in.Slug); err != nil {
-		return nil, sdk.BadRequest(err.Error())
-	}
 	if in.Name == "" {
 		return nil, sdk.BadRequest("organization name is required")
 	}
 
-	// Verify the platform tenant exists and is actually a platform.
+	// Auto-generate slug from name if not provided.
+	if in.Slug == "" {
+		in.Slug = slugify(in.Name)
+		if in.Slug == "" {
+			return nil, sdk.BadRequest("unable to generate a slug from the organization name; please provide one explicitly")
+		}
+	}
+	if err := validateSlug(in.Slug); err != nil {
+		return nil, sdk.BadRequest(err.Error())
+	}
+
+	// Fetch the platform tenant (needed for depth and path computation).
 	platform, err := s.tenants.GetByID(ctx, in.PlatformID)
 	if err != nil {
 		return nil, fmt.Errorf("iam: resolve platform tenant: %w", err)
-	}
-	if !platform.IsPlatform() {
-		return nil, sdk.BadRequest("parent must be a platform tenant")
 	}
 
 	// Verify the user exists.
@@ -186,6 +193,12 @@ func (s *RegistrationService) CreateOrganization(ctx context.Context, in CreateO
 		}
 		org.ID = uuid.New()
 		org.Path = buildPath(platform.Path, org.ID.String())
+		if in.LogoURL != nil {
+			org.LogoURL = in.LogoURL
+		}
+		if in.Metadata != nil {
+			org.Metadata = sdk.JSONB(*in.Metadata)
+		}
 
 		if org.Depth > types.MaxTenantDepth {
 			return sdk.BadRequest("maximum tenant depth exceeded")

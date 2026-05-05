@@ -8,8 +8,10 @@ import (
 // ── Request types ─────────────────────────────────────────────────────────────
 
 type createOrganizationRequest struct {
-	Name string `json:"name" binding:"required,min=1,max=120"`
-	Slug string `json:"slug" binding:"required,min=3,max=63"`
+	Name     string  `json:"name" binding:"required,min=1,max=120"`
+	Slug     string  `json:"slug" binding:"omitempty,min=3,max=63"`
+	LogoURL  *string `json:"logo_url"`
+	Metadata *string `json:"metadata"`
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -43,6 +45,8 @@ func (m *Module) handleCreateOrganization(c *gin.Context) {
 		PlatformID: pid,
 		Name:       req.Name,
 		Slug:       req.Slug,
+		LogoURL:    req.LogoURL,
+		Metadata:   req.Metadata,
 	})
 	if err != nil {
 		sdk.FromError(c, err)

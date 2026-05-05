@@ -791,18 +791,21 @@ func TestCreateOrganization_SuspendedUser(t *testing.T) {
 	assert.True(t, isForbidden(err), "suspended user should not create org, got: %v", err)
 }
 
-func TestCreateOrganization_MissingSlug(t *testing.T) {
+func TestCreateOrganization_AutoSlugFromName(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 	platform := h.createPlatform(t)
 	user := h.createUser(t)
 
-	_, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+	out, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
 		UserID:     user.ID,
 		PlatformID: platform.ID,
-		Name:       "No Slug Org",
+		Name:       "My Cool Company (UK)",
+		// Slug intentionally omitted -- should be auto-generated.
 	})
-	assert.True(t, isBadRequest(err), "should require slug, got: %v", err)
+	require.NoError(t, err)
+	assert.Equal(t, "my-cool-company-uk", out.Tenant.Slug,
+		"slug should be auto-generated from name")
 }
 
 func TestCreateOrganization_DuplicateSlug(t *testing.T) {
