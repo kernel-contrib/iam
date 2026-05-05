@@ -43,9 +43,11 @@ func (m *Module) registerClientRoutes(router *sdk.Router) {
 	// List tenants the authenticated user belongs to.
 	router.GET("/tenants", sdk.Self, m.handleListMyTenants)
 
-	// ── Tenant-scoped routes ──────────────────────────────────────────────
-	// These use tenant_id from the middleware context.
+	// ── Tenant-scoped self-service routes ─────────────────────────────────
+	// These require tenant context but only access the caller's own data.
 	t := router.Tenant()
+	t.GET("/me/roles", sdk.Self, m.handleGetMyRoles)
+
 	// Current tenant.
 	t.GET("/tenant", "iam.tenants.read", m.handleGetTenant)
 	t.PATCH("/tenant", "iam.tenants.manage", m.handleUpdateTenant)

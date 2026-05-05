@@ -90,3 +90,48 @@ func (m *Module) handleListMyTenants(c *gin.Context) {
 
 	sdk.OK(c, members)
 }
+
+// myRolesResponse combines the member's assigned roles with the effective
+// (resolved) permission set for the current tenant context.
+type myRolesResponse struct {
+	Roles       []MemberRole `json:"roles"`
+	Permissions []string     `json:"permissions"`
+}
+
+// handleGetMyRoles returns the authenticated user's roles and resolved
+// permissions for the current tenant. No special permission is needed since
+// users can only view their own access.
+func (m *Module) handleGetMyRoles(c *gin.Context) {
+	uid := userID(c)
+	tid := tenantID(c)
+
+	// Find the user's membership in this tenant.
+	member, err := m.repo.FindMemberByUserAndTenant(c.Request.Context(), uid, tid)
+	if err != nil {
+		if isNotFoundErr(err) {
+			sdk.Error(c, sdk.NotFound("membership", uid))
+			return
+		}
+		sdk.FromError(c, err)
+		return
+	}
+
+	// Get the assigned roles (with permission keys preloaded).
+	roles, err := m.roles.GetMemberRoles(c.Request.Context(), member.ID)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	// Resolve effective permissions (accounts for tenant hierarchy and RBAC mode).
+	perms, err := m.roles.ResolvePermissions(c.Request.Context(), uid, tid)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	sdk.OK(c, myRolesResponse{
+		Roles:       roles,
+		Permissions: perms,
+	})
+}
