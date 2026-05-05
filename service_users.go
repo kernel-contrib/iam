@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -52,6 +53,7 @@ type CreateUserInput struct {
 	AvatarURL  *string
 	Locale     *string
 	Timezone   *string
+	Metadata   json.RawMessage
 }
 
 // Create inserts a new user and publishes iam.user.created.
@@ -62,6 +64,10 @@ func (s *UserService) Create(ctx context.Context, in CreateUserInput) (*User, er
 		Email:      in.Email,
 		Phone:      in.Phone,
 		AvatarURL:  in.AvatarURL,
+		Metadata:   sdk.JSONB("{}"),
+	}
+	if len(in.Metadata) > 0 {
+		u.Metadata = sdk.JSONB(in.Metadata)
 	}
 	if in.Name != nil {
 		u.Name = sdk.JSONB(*in.Name)

@@ -1,6 +1,8 @@
 package iam
 
 import (
+	"encoding/json"
+
 	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 )
@@ -8,12 +10,13 @@ import (
 // ── Request/Response types ────────────────────────────────────────────────────
 
 type registerRequest struct {
-	Email     *string `json:"email"`
-	Phone     *string `json:"phone"`
-	Name      *string `json:"name"`
-	AvatarURL *string `json:"avatar_url"`
-	Locale    *string `json:"locale"`
-	Timezone  *string `json:"timezone"`
+	Email     *string         `json:"email"`
+	Phone     *string         `json:"phone"`
+	Name      *string         `json:"name"`
+	AvatarURL *string         `json:"avatar_url"`
+	Locale    *string         `json:"locale"`
+	Timezone  *string         `json:"timezone"`
+	Metadata  json.RawMessage `json:"metadata"`
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -47,6 +50,7 @@ func (m *Module) handleRegister(c *gin.Context) {
 		AvatarURL:  req.AvatarURL,
 		Locale:     req.Locale,
 		Timezone:   req.Timezone,
+		Metadata:   req.Metadata,
 	})
 	if err != nil {
 		sdk.FromError(c, err)

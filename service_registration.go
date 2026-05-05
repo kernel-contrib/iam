@@ -65,14 +65,15 @@ func NewRegistrationService(
 
 // RegisterInput carries the authenticated identity from the kernel's auth context.
 type RegisterInput struct {
-	Provider   string  // e.g. "firebase", read from auth context
-	ProviderID string  // e.g. the Firebase UID, read from auth context
-	Email      *string // optional, from request body
-	Phone      *string // optional, from request body
-	Name       *string // optional, from request body
-	AvatarURL  *string // optional, from request body
-	Locale     *string // optional, from request body
-	Timezone   *string // optional, from request body
+	Provider   string          // e.g. "firebase", read from auth context
+	ProviderID string          // e.g. the Firebase UID, read from auth context
+	Email      *string         // optional, from request body
+	Phone      *string         // optional, from request body
+	Name       *string         // optional, from request body
+	AvatarURL  *string         // optional, from request body
+	Locale     *string         // optional, from request body
+	Timezone   *string         // optional, from request body
+	Metadata   json.RawMessage // optional, from request body
 }
 
 // RegisterOutput returns the user and whether it was newly created.
@@ -108,6 +109,7 @@ func (s *RegistrationService) Register(ctx context.Context, in RegisterInput) (*
 		AvatarURL:  in.AvatarURL,
 		Locale:     in.Locale,
 		Timezone:   in.Timezone,
+		Metadata:   in.Metadata,
 	})
 	if err != nil {
 		// Handle race condition: another request created the user between
