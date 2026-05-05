@@ -285,8 +285,8 @@ func matchesRecipient(inv *Invitation, userEmail, userPhone *string) bool {
 	if inv.Phone != nil {
 		return userPhone != nil && *userPhone == *inv.Phone
 	}
-	// Invitation has neither email nor phone -- allow (defensive).
-	return true
+
+	return false
 }
 
 func (s *InvitationService) publish(ctx context.Context, subject string, payload map[string]any) {
