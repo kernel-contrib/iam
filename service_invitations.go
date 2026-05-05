@@ -162,17 +162,26 @@ type AcceptInput struct {
 	UserID   uuid.UUID
 }
 
+// AcceptResult contains the outcome of a successfully accepted invitation.
+type AcceptResult struct {
+	Member       *TenantMember
+	TenantID     uuid.UUID
+	RoleID       uuid.UUID
+	InvitationID uuid.UUID
+}
+
 // Accept processes an invitation token:
 //  1. Hash the raw token and look up the invitation with FOR UPDATE SKIP LOCKED.
 //  2. Validate the invitation is still pending and not expired.
 //  3. Create the membership + assign the designated role.
 //  4. Mark the invitation as accepted.
 //
-// All steps run in a single transaction for consistency.
-func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptInput) (*TenantMember, error) {
+// All DB steps run in a single transaction. Events are published after
+// the transaction commits to prevent side effects on rollback.
+func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptInput) (*AcceptResult, error) {
 	hash := hashToken(in.RawToken)
 
-	var member *TenantMember
+	var result AcceptResult
 
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Lock the invitation row.
@@ -196,14 +205,14 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 		}
 
 		// 3. Create membership.
-		member = &TenantMember{
+		member := &TenantMember{
 			UserID:   in.UserID,
 			TenantID: inv.TenantID,
 			Status:   MemberStatusActive,
 		}
 		if err := tx.Create(member).Error; err != nil {
 			if isDuplicateError(err) {
-				// User is already a member — still accept the invitation.
+				// User is already a member -- still accept the invitation.
 				existing := &TenantMember{}
 				if err := tx.Where("user_id = ? AND tenant_id = ?", in.UserID, inv.TenantID).
 					First(existing).Error; err != nil {
@@ -232,11 +241,12 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 			return fmt.Errorf("iam: mark invitation accepted: %w", err)
 		}
 
-		s.publish(ctx, "iam.invitation.accepted", map[string]any{
-			"invitation_id": inv.ID,
-			"tenant_id":     inv.TenantID,
-			"user_id":       in.UserID,
-		})
+		result = AcceptResult{
+			Member:       member,
+			TenantID:     inv.TenantID,
+			RoleID:       inv.RoleID,
+			InvitationID: inv.ID,
+		}
 
 		return nil
 	})
@@ -244,7 +254,15 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 	if err != nil {
 		return nil, err
 	}
-	return member, nil
+
+	// Publish after commit so the event only fires on success.
+	s.publish(ctx, "iam.invitation.accepted", map[string]any{
+		"invitation_id": result.InvitationID,
+		"tenant_id":     result.TenantID,
+		"user_id":       in.UserID,
+	})
+
+	return &result, nil
 }
 
 // ── internal ──────────────────────────────────────────────────────────────────

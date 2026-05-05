@@ -1,0 +1,63 @@
+package iam
+
+import (
+	"github.com/gin-gonic/gin"
+	"go.edgescale.dev/kernel/sdk"
+)
+
+// ── Request types ─────────────────────────────────────────────────────────────
+
+type createOrganizationRequest struct {
+	Name string `json:"name" binding:"required,min=1,max=120"`
+	Slug string `json:"slug" binding:"required,min=3,max=63"`
+}
+
+// ── Handler ───────────────────────────────────────────────────────────────────
+
+// handleCreateOrganization creates a new organization under the platform tenant
+// and assigns the authenticated user as the founding admin.
+//
+// The entire operation (org + membership + roles + assignment) runs in a
+// single database transaction. If any step fails, nothing is committed.
+func (m *Module) handleCreateOrganization(c *gin.Context) {
+	uid := userID(c)
+	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
+		return
+	}
+
+	var req createOrganizationRequest
+	if !sdk.BindAndValidate(c, &req) {
+		return
+	}
+
+	// Resolve platform_id from kernel context.
+	pid, err := platformIDFromContext(c)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	out, err := m.registration.CreateOrganization(c.Request.Context(), CreateOrgForUserInput{
+		UserID:     uid,
+		PlatformID: pid,
+		Name:       req.Name,
+		Slug:       req.Slug,
+	})
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	m.ctx.Audit.Log(c.Request.Context(), sdk.AuditEntry{
+		Action:     sdk.AuditCreate,
+		Resource:   "organization",
+		ResourceID: out.Tenant.ID.String(),
+		Changes: map[string]sdk.AuditChange{
+			"slug": {New: req.Slug},
+			"name": {New: req.Name},
+		},
+	})
+
+	sdk.Created(c, out)
+}

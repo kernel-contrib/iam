@@ -22,16 +22,25 @@ func (m *Module) registerClientRoutes(router *sdk.Router) {
 	// Permissions catalog (all module permissions).
 	router.GET("/permissions", "iam.permissions.read", m.handleListPermissions)
 
-	// Onboarding - self-service endpoint.
-	router.POST("/onboard", sdk.Self, m.handleOnboard)
+	// Self-service registration. Uses sdk.Self because the IAM user record
+	// may not exist yet -- the kernel only needs a valid IdP token.
+	router.POST("/register", sdk.Self, m.handleRegister)
+
+	// Self-service organization creation. Uses sdk.Self because the user
+	// must already be registered (internal_user_id is required).
+	router.POST("/organizations", sdk.Self, m.handleCreateOrganization)
+
+	// Self-service invitation acceptance. Uses sdk.Self because the user
+	// must already be registered.
+	router.POST("/invitations/accept", sdk.Self, m.handleAcceptInvitation)
 
 	// Self-service profile.
-	router.GET("/me", "self", m.handleGetMe)
-	router.PATCH("/me", "self", m.handleUpdateMe)
-	router.DELETE("/me", "self", m.handleEraseMe)
+	router.GET("/me", sdk.Self, m.handleGetMe)
+	router.PATCH("/me", sdk.Self, m.handleUpdateMe)
+	router.DELETE("/me", sdk.Self, m.handleEraseMe)
 
 	// List tenants the authenticated user belongs to.
-	router.GET("/tenants", "self", m.handleListMyTenants)
+	router.GET("/tenants", sdk.Self, m.handleListMyTenants)
 
 	// ── Tenant-scoped routes ──────────────────────────────────────────────
 	// These use tenant_id from the middleware context.

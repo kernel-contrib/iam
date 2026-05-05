@@ -102,15 +102,15 @@ func newTestDB(t *testing.T) *gorm.DB {
 // ── test harness ──────────────────────────────────────────────────────────────
 
 type testHarness struct {
-	db      *gorm.DB
-	ctx     *sdk.Context
-	repo    *iam.Repository
-	users   *iam.UserService
-	tenants *iam.TenantService
-	members *iam.MemberService
-	roles   *iam.RoleService
-	invites *iam.InvitationService
-	onboard *iam.OnboardService
+	db           *gorm.DB
+	ctx          *sdk.Context
+	repo         *iam.Repository
+	users        *iam.UserService
+	tenants      *iam.TenantService
+	members      *iam.MemberService
+	roles        *iam.RoleService
+	invites      *iam.InvitationService
+	registration *iam.RegistrationService
 }
 
 func newTestHarness(t *testing.T) *testHarness {
@@ -164,18 +164,21 @@ func newTestHarness(t *testing.T) *testHarness {
 		return adminRole, nil
 	}
 
-	onboard := iam.NewOnboardService(users, tenants, members, roles, invites, seedFn, *tctx, log)
+	registration := iam.NewRegistrationService(
+		users, tenants, members, roles, invites,
+		seedFn, db, bus, tctx.Redis, log,
+	)
 
 	return &testHarness{
-		db:      db,
-		ctx:     tctx,
-		repo:    repo,
-		users:   users,
-		tenants: tenants,
-		members: members,
-		roles:   roles,
-		invites: invites,
-		onboard: onboard,
+		db:           db,
+		ctx:          tctx,
+		repo:         repo,
+		users:        users,
+		tenants:      tenants,
+		members:      members,
+		roles:        roles,
+		invites:      invites,
+		registration: registration,
 	}
 }
 
@@ -661,73 +664,117 @@ func TestRoleRevoke(t *testing.T) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Onboarding Tests
+// Registration Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
-func TestOnboard_NewUser_NewOrg(t *testing.T) {
+func TestRegister_NewUser(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	out, err := h.registration.Register(ctx, iam.RegisterInput{
+		Provider:   "firebase",
+		ProviderID: "new-user-1",
+	})
+	require.NoError(t, err)
+	assert.True(t, out.IsNew)
+	assert.NotEqual(t, uuid.Nil, out.User.ID)
+	assert.Equal(t, "firebase", out.User.Provider)
+	assert.Equal(t, "new-user-1", out.User.ProviderID)
+}
+
+func TestRegister_ExistingUser(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	// Register once.
+	out1, err := h.registration.Register(ctx, iam.RegisterInput{
+		Provider:   "firebase",
+		ProviderID: "repeat-user",
+	})
+	require.NoError(t, err)
+	assert.True(t, out1.IsNew)
+
+	// Register again with same identity.
+	out2, err := h.registration.Register(ctx, iam.RegisterInput{
+		Provider:   "firebase",
+		ProviderID: "repeat-user",
+	})
+	require.NoError(t, err)
+	assert.False(t, out2.IsNew)
+	assert.Equal(t, out1.User.ID, out2.User.ID, "same user returned")
+}
+
+func TestRegister_MissingProvider(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	_, err := h.registration.Register(ctx, iam.RegisterInput{})
+	assert.True(t, isBadRequest(err), "should require provider, got: %v", err)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Create Organization Tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+func TestCreateOrganization_Success(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 	platform := h.createPlatform(t)
+	user := h.createUser(t)
 
-	out, err := h.onboard.Execute(ctx, iam.OnboardInput{
-		Provider:   "firebase",
-		ProviderID: "new-user-1",
-		TenantName: "My Company",
-		TenantSlug: "my-company",
+	out, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     user.ID,
 		PlatformID: platform.ID,
+		Name:       "My Company",
+		Slug:       "my-company",
 	})
 	require.NoError(t, err)
-	assert.NotNil(t, out.User)
-	assert.NotNil(t, out.Tenant)
-	assert.True(t, out.IsNew)
 	assert.Equal(t, "my-company", out.Tenant.Slug)
 	assert.Equal(t, iam.TenantTypeOrganization, out.Tenant.Type)
+	assert.NotNil(t, out.Membership)
+	assert.NotNil(t, out.Role)
+	assert.Equal(t, "admin", out.Role.Slug)
 
 	// User should be a member of the new org.
-	ok, err := h.members.IsMember(ctx, out.User.ID, out.Tenant.ID)
+	ok, err := h.members.IsMember(ctx, user.ID, out.Tenant.ID)
 	require.NoError(t, err)
 	assert.True(t, ok, "user should be member of the new org")
 
 	// Admin role should be assigned.
-	perms, err := h.roles.ResolvePermissions(ctx, out.User.ID, out.Tenant.ID)
+	perms, err := h.roles.ResolvePermissions(ctx, user.ID, out.Tenant.ID)
 	require.NoError(t, err)
 	assert.Contains(t, perms, "*", "founder should have wildcard admin")
 }
 
-func TestOnboard_ExistingUser(t *testing.T) {
+func TestCreateOrganization_ExistingUserMultipleOrgs(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 	platform := h.createPlatform(t)
+	user := h.createUser(t)
 
-	// First onboard.
-	out1, err := h.onboard.Execute(ctx, iam.OnboardInput{
-		Provider:   "firebase",
-		ProviderID: "repeat-user",
-		TenantName: "First Org",
-		TenantSlug: "first-org",
+	out1, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     user.ID,
 		PlatformID: platform.ID,
+		Name:       "First Org",
+		Slug:       "first-org",
 	})
 	require.NoError(t, err)
 
-	// Second onboard with same identity — new org.
-	out2, err := h.onboard.Execute(ctx, iam.OnboardInput{
-		Provider:   "firebase",
-		ProviderID: "repeat-user",
-		TenantName: "Second Org",
-		TenantSlug: "second-org",
+	out2, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     user.ID,
 		PlatformID: platform.ID,
+		Name:       "Second Org",
+		Slug:       "second-org",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, out1.User.ID, out2.User.ID, "same user across onboards")
 	assert.NotEqual(t, out1.Tenant.ID, out2.Tenant.ID, "different orgs")
 }
 
-func TestOnboard_SuspendedUser(t *testing.T) {
+func TestCreateOrganization_SuspendedUser(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 	platform := h.createPlatform(t)
 
-	// Create and suspend user.
 	user, err := h.users.Create(ctx, iam.CreateUserInput{
 		Provider: "firebase", ProviderID: "suspended-guy",
 	})
@@ -735,27 +782,53 @@ func TestOnboard_SuspendedUser(t *testing.T) {
 	_, err = h.users.Suspend(ctx, user.ID)
 	require.NoError(t, err)
 
-	_, err = h.onboard.Execute(ctx, iam.OnboardInput{
-		Provider:   "firebase",
-		ProviderID: "suspended-guy",
-		TenantName: "Should Fail",
-		TenantSlug: "should-fail",
+	_, err = h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     user.ID,
 		PlatformID: platform.ID,
+		Name:       "Should Fail",
+		Slug:       "should-fail",
 	})
-	assert.True(t, isForbidden(err), "suspended user should not onboard, got: %v", err)
+	assert.True(t, isForbidden(err), "suspended user should not create org, got: %v", err)
 }
 
-func TestOnboard_MissingSlug(t *testing.T) {
+func TestCreateOrganization_MissingSlug(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
 	platform := h.createPlatform(t)
+	user := h.createUser(t)
 
-	_, err := h.onboard.Execute(ctx, iam.OnboardInput{
-		Provider:   "firebase",
-		ProviderID: "no-slug-user",
+	_, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     user.ID,
 		PlatformID: platform.ID,
+		Name:       "No Slug Org",
 	})
-	assert.True(t, isBadRequest(err), "should require slug/name, got: %v", err)
+	assert.True(t, isBadRequest(err), "should require slug, got: %v", err)
+}
+
+func TestCreateOrganization_DuplicateSlug(t *testing.T) {
+	// Partial unique indexes (WHERE deleted_at IS NULL) are not reliably
+	// enforced in SQLite. This test validates correctly on PostgreSQL.
+	t.Skip("requires PostgreSQL for partial unique index enforcement")
+	h := newTestHarness(t)
+	ctx := context.Background()
+	platform := h.createPlatform(t)
+	user := h.createUser(t)
+
+	_, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     user.ID,
+		PlatformID: platform.ID,
+		Name:       "Acme",
+		Slug:       "acme",
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     user.ID,
+		PlatformID: platform.ID,
+		Name:       "Acme Again",
+		Slug:       "acme",
+	})
+	assert.True(t, isConflict(err), "duplicate slug should conflict, got: %v", err)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

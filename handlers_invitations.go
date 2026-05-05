@@ -104,3 +104,47 @@ func (m *Module) handleRevokeInvitation(c *gin.Context) {
 
 	sdk.NoContent(c)
 }
+
+// ── Self-service invitation acceptance ────────────────────────────────────────
+
+type acceptInvitationRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+// handleAcceptInvitation is a self-service endpoint where an authenticated
+// user accepts a pending invitation and joins the associated tenant.
+//
+// The user ID comes from the kernel auth context. The invitation carries
+// the tenant and role -- the client only needs to supply the token.
+func (m *Module) handleAcceptInvitation(c *gin.Context) {
+	uid := userID(c)
+	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
+		return
+	}
+
+	var req acceptInvitationRequest
+	if !sdk.BindAndValidate(c, &req) {
+		return
+	}
+
+	out, err := m.registration.AcceptInvitation(c.Request.Context(), AcceptInviteInput{
+		UserID: uid,
+		Token:  req.Token,
+	})
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	m.ctx.Audit.Log(c.Request.Context(), sdk.AuditEntry{
+		Action:     sdk.AuditCreate,
+		Resource:   "membership",
+		ResourceID: out.Membership.ID.String(),
+		Changes: map[string]sdk.AuditChange{
+			"tenant_id": {New: out.Tenant.ID.String()},
+		},
+	})
+
+	sdk.OK(c, out)
+}

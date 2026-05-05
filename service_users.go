@@ -48,6 +48,10 @@ type CreateUserInput struct {
 	ProviderID string
 	Email      *string
 	Phone      *string
+	Name       *string
+	AvatarURL  *string
+	Locale     *string
+	Timezone   *string
 }
 
 // Create inserts a new user and publishes iam.user.created.
@@ -57,6 +61,16 @@ func (s *UserService) Create(ctx context.Context, in CreateUserInput) (*User, er
 		ProviderID: in.ProviderID,
 		Email:      in.Email,
 		Phone:      in.Phone,
+		AvatarURL:  in.AvatarURL,
+	}
+	if in.Name != nil {
+		u.Name = sdk.JSONB(*in.Name)
+	}
+	if in.Locale != nil {
+		u.Locale = *in.Locale
+	}
+	if in.Timezone != nil {
+		u.Timezone = *in.Timezone
 	}
 	if err := s.repo.CreateUser(ctx, u); err != nil {
 		if isDuplicateError(err) {
