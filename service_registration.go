@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -132,8 +133,8 @@ type CreateOrgForUserInput struct {
 	PlatformID uuid.UUID // resolved from kernel config
 	Name       string
 	Slug       string
-	LogoURL    *string // optional, URL or storage UUID
-	Metadata   *string // optional, raw JSON
+	LogoURL    *string         // optional, URL or storage UUID
+	Metadata   json.RawMessage // optional, raw JSON object
 }
 
 // CreateOrgOutput returns the new tenant, membership, and admin role.
@@ -197,7 +198,7 @@ func (s *RegistrationService) CreateOrganization(ctx context.Context, in CreateO
 			org.LogoURL = in.LogoURL
 		}
 		if in.Metadata != nil {
-			org.Metadata = sdk.JSONB(*in.Metadata)
+			org.Metadata = sdk.JSONB(in.Metadata)
 		}
 
 		if org.Depth > types.MaxTenantDepth {
