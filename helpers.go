@@ -11,6 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	goslug "github.com/gosimple/slug"
+	"go.edgescale.dev/kernel/sdk"
 	"gorm.io/gorm"
 )
 
@@ -44,6 +46,20 @@ func validateSlug(slug string) error {
 		return fmt.Errorf("slug must be 3-63 lowercase alphanumeric characters or hyphens, starting and ending with alphanumeric")
 	}
 	return nil
+}
+
+// slugify converts a human-readable name into a valid slug using Unicode
+// transliteration. Handles Arabic, CJK, Cyrillic, and other scripts.
+// Examples:
+//   - "My Company (UK)" -> "my-company-uk"
+//   - "شركة أكمي"       -> "shrkt-akmy"
+func slugify(name string) string {
+	s := goslug.Make(name)
+	if len(s) > 63 {
+		s = s[:63]
+		s = strings.TrimRight(s, "-")
+	}
+	return s
 }
 
 // ── Error helpers ─────────────────────────────────────────────────────────────
@@ -95,15 +111,53 @@ func buildPath(parentPath, id string) string {
 // Currently reads "org_id" (kernel v0.1.0). Will switch to "tenant_id"
 // once the kernel URL-based tenant routing is released.
 func tenantID(c *gin.Context) uuid.UUID {
-	return get(c, "tenant_id")
+	return getUUID(c, "tenant_id")
 }
 
-// userID extracts the authenticated user's UUID from the gin context.
+// userID extracts the authenticated user's internal UUID from the gin context.
+// Set by the kernel's resolveUser middleware for routes that require
+// an existing IAM user (permission = "self").
 func userID(c *gin.Context) uuid.UUID {
-	return get(c, "internal_user_id")
+	return getUUID(c, "internal_user_id")
 }
 
-func get(c *gin.Context, key string) uuid.UUID {
+// authProvider returns the IdP provider name (e.g. "firebase") from the
+// kernel's authenticate() middleware context.
+func authProvider(c *gin.Context) string {
+	if v, ok := c.Get("auth_provider"); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// authProviderID returns the IdP user identifier (e.g. the Firebase UID)
+// from the kernel's authenticate() middleware context.
+func authProviderID(c *gin.Context) string {
+	if v, ok := c.Get("auth_provider_id"); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// platformIDFromContext extracts the platform tenant UUID from the gin context.
+// Returns a typed error if the value is missing or the wrong type.
+func platformIDFromContext(c *gin.Context) (uuid.UUID, error) {
+	v, ok := c.Get("platform_id")
+	if !ok {
+		return uuid.Nil, sdk.Internal("platform_id not available in context")
+	}
+	id, ok := v.(uuid.UUID)
+	if !ok {
+		return uuid.Nil, sdk.Internal("platform_id has unexpected type in context")
+	}
+	return id, nil
+}
+
+func getUUID(c *gin.Context, key string) uuid.UUID {
 	_id, ok := c.Get(key)
 	if !ok {
 		return uuid.Nil

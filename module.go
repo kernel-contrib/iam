@@ -11,14 +11,14 @@ import (
 // It manages users, tenants (platform → org → branch), memberships, roles,
 // permissions, and invitations.
 type Module struct {
-	ctx         sdk.Context
-	repo        *Repository
-	users       *UserService
-	tenants     *TenantService
-	members     *MemberService
-	roles       *RoleService
-	invitations *InvitationService
-	onboard     *OnboardService
+	ctx          sdk.Context
+	repo         *Repository
+	users        *UserService
+	tenants      *TenantService
+	members      *MemberService
+	roles        *RoleService
+	invitations  *InvitationService
+	registration *RegistrationService
 }
 
 // New constructs the IAM module.
@@ -120,10 +120,10 @@ func (m *Module) Init(ctx sdk.Context) error {
 	m.members = NewMemberService(m.repo, ctx.Bus, ctx.Redis, ctx.Logger)
 	m.roles = NewRoleService(m.repo, ctx.Bus, ctx.Redis, ctx.Logger, ctx.ValidPermissionKey)
 	m.invitations = NewInvitationService(m.repo, ctx.Bus, ctx.Logger)
-	m.onboard = NewOnboardService(
+	m.registration = NewRegistrationService(
 		m.users, m.tenants, m.members, m.roles, m.invitations,
 		m.seedSystemRoles, // shared provisioning logic (provision.go)
-		ctx, ctx.Logger,
+		ctx.DB, ctx.Bus, ctx.Redis, ctx.Logger,
 	)
 
 	// Register the reader for cross-module consumption.

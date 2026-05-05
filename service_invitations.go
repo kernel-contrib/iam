@@ -154,12 +154,90 @@ func (s *InvitationService) Revoke(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+// ── Preview ───────────────────────────────────────────────────────────────────
+
+// PreviewInput contains the token and the requesting user's identity
+// for recipient verification.
+type PreviewInput struct {
+	RawToken  string
+	UserEmail *string
+	UserPhone *string
+}
+
+// PreviewResult contains the invitation details shown before acceptance.
+type PreviewResult struct {
+	InvitationID uuid.UUID `json:"invitation_id"`
+	TenantID     uuid.UUID `json:"tenant_id"`
+	TenantName   string    `json:"tenant_name"`
+	RoleID       uuid.UUID `json:"role_id"`
+	RoleName     string    `json:"role_name"`
+	InvitedBy    uuid.UUID `json:"invited_by"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// Preview validates an invitation token and returns its details without
+// modifying any state. Used by the frontend to show a confirmation screen
+// before the user taps "Accept".
+func (s *InvitationService) Preview(ctx context.Context, in PreviewInput) (*PreviewResult, error) {
+	hash := hashToken(in.RawToken)
+
+	inv, err := s.repo.FindInvitationByTokenHash(ctx, hash)
+	if isNotFoundErr(err) {
+		return nil, sdk.NotFound("invitation", "token")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if inv.Status != InvitationStatusPending {
+		return nil, sdk.BadRequest(fmt.Sprintf("invitation is %s", inv.Status))
+	}
+	if time.Now().After(inv.ExpiresAt) {
+		return nil, sdk.BadRequest("invitation has expired")
+	}
+
+	if !matchesRecipient(inv, in.UserEmail, in.UserPhone) {
+		return nil, sdk.Forbidden("invitation was not sent to this user")
+	}
+
+	// Fetch tenant and role names for the preview.
+	tenant, err := s.repo.FindTenantByID(ctx, inv.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("iam: fetch tenant for preview: %w", err)
+	}
+
+	role, err := s.repo.FindRoleByID(ctx, inv.RoleID)
+	if err != nil {
+		return nil, fmt.Errorf("iam: fetch role for preview: %w", err)
+	}
+
+	return &PreviewResult{
+		InvitationID: inv.ID,
+		TenantID:     inv.TenantID,
+		TenantName:   tenant.Name,
+		RoleID:       inv.RoleID,
+		RoleName:     role.Name,
+		InvitedBy:    inv.InvitedBy,
+		ExpiresAt:    inv.ExpiresAt,
+	}, nil
+}
+
 // ── Accept ────────────────────────────────────────────────────────────────────
 
-// AcceptInput contains the raw invitation token and the accepting user's ID.
+// AcceptInput contains the raw invitation token and the accepting user's identity.
 type AcceptInput struct {
-	RawToken string
-	UserID   uuid.UUID
+	RawToken  string
+	UserID    uuid.UUID
+	UserEmail *string // for recipient verification
+	UserPhone *string // for recipient verification
+}
+
+// AcceptResult contains the outcome of a successfully accepted invitation.
+type AcceptResult struct {
+	Member       *TenantMember
+	TenantID     uuid.UUID
+	RoleID       uuid.UUID
+	InvitationID uuid.UUID
 }
 
 // Accept processes an invitation token:
@@ -168,11 +246,12 @@ type AcceptInput struct {
 //  3. Create the membership + assign the designated role.
 //  4. Mark the invitation as accepted.
 //
-// All steps run in a single transaction for consistency.
-func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptInput) (*TenantMember, error) {
+// All DB steps run in a single transaction. Events are published after
+// the transaction commits to prevent side effects on rollback.
+func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptInput) (*AcceptResult, error) {
 	hash := hashToken(in.RawToken)
 
-	var member *TenantMember
+	var result AcceptResult
 
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Lock the invitation row.
@@ -195,15 +274,20 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 			return sdk.BadRequest("invitation has expired")
 		}
 
-		// 3. Create membership.
-		member = &TenantMember{
+		// 3. Verify the accepting user is the intended recipient.
+		if !matchesRecipient(inv, in.UserEmail, in.UserPhone) {
+			return sdk.Forbidden("invitation was not sent to this user")
+		}
+
+		// 4. Create membership.
+		member := &TenantMember{
 			UserID:   in.UserID,
 			TenantID: inv.TenantID,
 			Status:   MemberStatusActive,
 		}
 		if err := tx.Create(member).Error; err != nil {
 			if isDuplicateError(err) {
-				// User is already a member — still accept the invitation.
+				// User is already a member -- still accept the invitation.
 				existing := &TenantMember{}
 				if err := tx.Where("user_id = ? AND tenant_id = ?", in.UserID, inv.TenantID).
 					First(existing).Error; err != nil {
@@ -215,14 +299,14 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 			}
 		}
 
-		// 4. Assign the designated role.
+		// 5. Assign the designated role.
 		mr := MemberRole{MemberID: member.ID, RoleID: inv.RoleID}
 		if err := tx.Where("member_id = ? AND role_id = ?", member.ID, inv.RoleID).
 			FirstOrCreate(&mr).Error; err != nil {
 			return fmt.Errorf("iam: assign invitation role: %w", err)
 		}
 
-		// 5. Mark invitation accepted.
+		// 6. Mark invitation accepted.
 		now := time.Now()
 		if err := tx.Model(&Invitation{}).Where("id = ?", inv.ID).
 			Updates(map[string]any{
@@ -232,11 +316,12 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 			return fmt.Errorf("iam: mark invitation accepted: %w", err)
 		}
 
-		s.publish(ctx, "iam.invitation.accepted", map[string]any{
-			"invitation_id": inv.ID,
-			"tenant_id":     inv.TenantID,
-			"user_id":       in.UserID,
-		})
+		result = AcceptResult{
+			Member:       member,
+			TenantID:     inv.TenantID,
+			RoleID:       inv.RoleID,
+			InvitationID: inv.ID,
+		}
 
 		return nil
 	})
@@ -244,10 +329,33 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 	if err != nil {
 		return nil, err
 	}
-	return member, nil
+
+	// Publish after commit so the event only fires on success.
+	s.publish(ctx, "iam.invitation.accepted", map[string]any{
+		"invitation_id": result.InvitationID,
+		"tenant_id":     result.TenantID,
+		"user_id":       in.UserID,
+	})
+
+	return &result, nil
 }
 
 // ── internal ──────────────────────────────────────────────────────────────────
+
+// matchesRecipient checks that the accepting user's email or phone matches
+// the invitation's intended recipient. If the invitation targets an email,
+// the user must have that email. Same for phone. This prevents users from
+// accepting invitations that were not sent to them.
+func matchesRecipient(inv *Invitation, userEmail, userPhone *string) bool {
+	if inv.Email != nil {
+		return userEmail != nil && *userEmail == *inv.Email
+	}
+	if inv.Phone != nil {
+		return userPhone != nil && *userPhone == *inv.Phone
+	}
+
+	return false
+}
 
 func (s *InvitationService) publish(ctx context.Context, subject string, payload map[string]any) {
 	if s.bus == nil {
