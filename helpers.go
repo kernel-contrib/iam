@@ -9,10 +9,10 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	goslug "github.com/gosimple/slug"
-	"go.edgescale.dev/kernel/sdk"
 	"gorm.io/gorm"
 )
 

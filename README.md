@@ -52,7 +52,7 @@ import (
 
     "github.com/redis/go-redis/v9"
     "go.edgescale.dev/kernel"
-    "go.edgescale.dev/kernel/sdk"
+    "github.com/edgescaleDev/kernel/sdk"
 
     iam "github.com/kernel-contrib/iam"
     authfirebase "github.com/kernel-contrib/auth-firebase"

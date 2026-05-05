@@ -3,11 +3,11 @@ module github.com/kernel-contrib/iam
 go 1.26.1
 
 require (
+	github.com/edgescaleDev/kernel v0.3.3
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.15.0
 	github.com/stretchr/testify v1.11.1
-	go.edgescale.dev/kernel v0.2.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )

@@ -3,17 +3,17 @@ package iam
 import (
 	"encoding/json"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
-	"go.edgescale.dev/kernel/sdk"
 )
 
 // ── Request types ─────────────────────────────────────────────────────────────
 
 type createOrganizationRequest struct {
-	Name     string           `json:"name" binding:"required,min=1,max=120"`
-	Slug     string           `json:"slug" binding:"omitempty,min=3,max=63"`
-	LogoURL  *string          `json:"logo_url"`
-	Metadata json.RawMessage  `json:"metadata"`
+	Name     string          `json:"name" binding:"required,min=1,max=120"`
+	Slug     string          `json:"slug" binding:"omitempty,min=3,max=63"`
+	LogoURL  *string         `json:"logo_url"`
+	Metadata json.RawMessage `json:"metadata"`
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────

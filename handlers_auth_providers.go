@@ -1,8 +1,8 @@
 package iam
 
 import (
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
-	"go.edgescale.dev/kernel/sdk"
 )
 
 // ── Request/Response types ────────────────────────────────────────────────────
