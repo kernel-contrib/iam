@@ -283,8 +283,10 @@ func (s *RegistrationService) AcceptInvitation(ctx context.Context, in AcceptInv
 	}
 
 	result, err := s.invites.Accept(ctx, s.db, AcceptInput{
-		RawToken: in.Token,
-		UserID:   in.UserID,
+		RawToken:  in.Token,
+		UserID:    in.UserID,
+		UserEmail: user.Email,
+		UserPhone: user.Phone,
 	})
 	if err != nil {
 		return nil, err

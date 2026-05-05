@@ -832,6 +832,308 @@ func TestCreateOrganization_DuplicateSlug(t *testing.T) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Accept Invitation Tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// setupOrgWithInvitation is a test helper that creates a platform, org, and
+// a phone-based invitation. Returns everything needed for acceptance tests.
+func setupOrgWithInvitation(t *testing.T, h *testHarness, phone string) (
+	admin *iam.User,
+	org *iam.Tenant,
+	rawToken string,
+	roleID uuid.UUID,
+) {
+	t.Helper()
+	ctx := context.Background()
+	platform := h.createPlatform(t)
+	admin = h.createUser(t)
+
+	// Create org through registration service (seeds roles).
+	orgOut, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     admin.ID,
+		PlatformID: platform.ID,
+		Name:       "Invite Org",
+		Slug:       "invite-org-" + uuid.New().String()[:8],
+	})
+	require.NoError(t, err)
+	org = orgOut.Tenant
+
+	// Find the "member" role for the invitation.
+	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", org.ID)
+	require.NoError(t, err)
+	roleID = memberRole.ID
+
+	// Create invitation.
+	invOut, err := h.invites.Create(ctx, iam.CreateInvitationInput{
+		TenantID:  org.ID,
+		InvitedBy: admin.ID,
+		Phone:     &phone,
+		RoleID:    memberRole.ID,
+	})
+	require.NoError(t, err)
+	rawToken = invOut.RawToken
+
+	return admin, org, rawToken, roleID
+}
+
+func TestAcceptInvitation_HappyPath_Phone(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	phone := "+971501234567"
+	_, org, rawToken, _ := setupOrgWithInvitation(t, h, phone)
+
+	// Create a user with matching phone.
+	invitee, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "invitee-phone-1",
+		Phone:      &phone,
+	})
+	require.NoError(t, err)
+
+	out, err := h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: invitee.ID,
+		Token:  rawToken,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, org.ID, out.Tenant.ID)
+	assert.NotNil(t, out.Membership)
+	assert.NotNil(t, out.Role)
+
+	// User should be a member.
+	ok, err := h.members.IsMember(ctx, invitee.ID, org.ID)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestAcceptInvitation_HappyPath_Email(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	platform := h.createPlatform(t)
+	admin := h.createUser(t)
+
+	orgOut, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     admin.ID,
+		PlatformID: platform.ID,
+		Name:       "Email Org",
+		Slug:       "email-org-" + uuid.New().String()[:8],
+	})
+	require.NoError(t, err)
+
+	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	require.NoError(t, err)
+
+	email := "invitee@example.com"
+	invOut, err := h.invites.Create(ctx, iam.CreateInvitationInput{
+		TenantID:  orgOut.Tenant.ID,
+		InvitedBy: admin.ID,
+		Email:     &email,
+		RoleID:    memberRole.ID,
+	})
+	require.NoError(t, err)
+
+	// Create invitee with matching email.
+	invitee, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "invitee-email-1",
+		Email:      &email,
+	})
+	require.NoError(t, err)
+
+	out, err := h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: invitee.ID,
+		Token:  invOut.RawToken,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, orgOut.Tenant.ID, out.Tenant.ID)
+}
+
+func TestAcceptInvitation_WrongPhone(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	_, _, rawToken, _ := setupOrgWithInvitation(t, h, "+971501234567")
+
+	// Create a user with a different phone number.
+	wrongPhone := "+971509999999"
+	intruder, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "intruder-phone",
+		Phone:      &wrongPhone,
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: intruder.ID,
+		Token:  rawToken,
+	})
+	assert.True(t, isForbidden(err),
+		"wrong phone should be rejected, got: %v", err)
+}
+
+func TestAcceptInvitation_WrongEmail(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	platform := h.createPlatform(t)
+	admin := h.createUser(t)
+
+	orgOut, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     admin.ID,
+		PlatformID: platform.ID,
+		Name:       "Wrong Email Org",
+		Slug:       "wrong-email-org-" + uuid.New().String()[:8],
+	})
+	require.NoError(t, err)
+
+	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	require.NoError(t, err)
+
+	targetEmail := "correct@example.com"
+	invOut, err := h.invites.Create(ctx, iam.CreateInvitationInput{
+		TenantID:  orgOut.Tenant.ID,
+		InvitedBy: admin.ID,
+		Email:     &targetEmail,
+		RoleID:    memberRole.ID,
+	})
+	require.NoError(t, err)
+
+	// Create user with wrong email.
+	wrongEmail := "wrong@example.com"
+	intruder, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "intruder-email",
+		Email:      &wrongEmail,
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: intruder.ID,
+		Token:  invOut.RawToken,
+	})
+	assert.True(t, isForbidden(err),
+		"wrong email should be rejected, got: %v", err)
+}
+
+func TestAcceptInvitation_NoPhoneOnUser(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	_, _, rawToken, _ := setupOrgWithInvitation(t, h, "+971501234567")
+
+	// Create a user without any phone (phone invitation cannot match).
+	noPhone, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "no-phone-user",
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: noPhone.ID,
+		Token:  rawToken,
+	})
+	assert.True(t, isForbidden(err),
+		"user without phone should not accept phone invitation, got: %v", err)
+}
+
+func TestAcceptInvitation_InvalidToken(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	user := h.createUser(t)
+
+	_, err := h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: user.ID,
+		Token:  "completely-invalid-token",
+	})
+	assert.True(t, isNotFound(err),
+		"invalid token should be not found, got: %v", err)
+}
+
+func TestAcceptInvitation_ExpiredToken(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	phone := "+971501111111"
+	_, _, rawToken, _ := setupOrgWithInvitation(t, h, phone)
+
+	// Force-expire the invitation by updating expires_at.
+	h.db.Exec("UPDATE invitations SET expires_at = datetime('now', '-1 day')")
+
+	invitee, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "expired-invitee",
+		Phone:      &phone,
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: invitee.ID,
+		Token:  rawToken,
+	})
+	assert.True(t, isBadRequest(err),
+		"expired invitation should be bad request, got: %v", err)
+}
+
+func TestAcceptInvitation_RevokedToken(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	phone := "+971502222222"
+	_, org, rawToken, _ := setupOrgWithInvitation(t, h, phone)
+
+	// Revoke the invitation.
+	var invIDStr string
+	h.db.Raw("SELECT id FROM invitations WHERE tenant_id = ?", org.ID).Scan(&invIDStr)
+	invID, err := uuid.Parse(invIDStr)
+	require.NoError(t, err)
+	require.NoError(t, h.invites.Revoke(ctx, invID))
+
+	invitee, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "revoked-invitee",
+		Phone:      &phone,
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: invitee.ID,
+		Token:  rawToken,
+	})
+	// The repository query filters by status=pending, so a revoked invitation
+	// returns not-found rather than bad-request. This is acceptable -- it avoids
+	// leaking the existence of the revoked invitation.
+	assert.True(t, isNotFound(err),
+		"revoked invitation should not be found, got: %v", err)
+}
+
+func TestAcceptInvitation_SuspendedUser(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	phone := "+971503333333"
+	_, _, rawToken, _ := setupOrgWithInvitation(t, h, phone)
+
+	// Create and suspend the invitee.
+	invitee, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "suspended-invitee",
+		Phone:      &phone,
+	})
+	require.NoError(t, err)
+	_, err = h.users.Suspend(ctx, invitee.ID)
+	require.NoError(t, err)
+
+	_, err = h.registration.AcceptInvitation(ctx, iam.AcceptInviteInput{
+		UserID: invitee.ID,
+		Token:  rawToken,
+	})
+	assert.True(t, isForbidden(err),
+		"suspended user should not accept invitation, got: %v", err)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Helper Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 

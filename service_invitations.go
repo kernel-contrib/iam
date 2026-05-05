@@ -156,10 +156,12 @@ func (s *InvitationService) Revoke(ctx context.Context, id uuid.UUID) error {
 
 // ── Accept ────────────────────────────────────────────────────────────────────
 
-// AcceptInput contains the raw invitation token and the accepting user's ID.
+// AcceptInput contains the raw invitation token and the accepting user's identity.
 type AcceptInput struct {
-	RawToken string
-	UserID   uuid.UUID
+	RawToken  string
+	UserID    uuid.UUID
+	UserEmail *string // for recipient verification
+	UserPhone *string // for recipient verification
 }
 
 // AcceptResult contains the outcome of a successfully accepted invitation.
@@ -204,7 +206,12 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 			return sdk.BadRequest("invitation has expired")
 		}
 
-		// 3. Create membership.
+		// 3. Verify the accepting user is the intended recipient.
+		if !matchesRecipient(inv, in.UserEmail, in.UserPhone) {
+			return sdk.Forbidden("invitation was not sent to this user")
+		}
+
+		// 4. Create membership.
 		member := &TenantMember{
 			UserID:   in.UserID,
 			TenantID: inv.TenantID,
@@ -224,14 +231,14 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 			}
 		}
 
-		// 4. Assign the designated role.
+		// 5. Assign the designated role.
 		mr := MemberRole{MemberID: member.ID, RoleID: inv.RoleID}
 		if err := tx.Where("member_id = ? AND role_id = ?", member.ID, inv.RoleID).
 			FirstOrCreate(&mr).Error; err != nil {
 			return fmt.Errorf("iam: assign invitation role: %w", err)
 		}
 
-		// 5. Mark invitation accepted.
+		// 6. Mark invitation accepted.
 		now := time.Now()
 		if err := tx.Model(&Invitation{}).Where("id = ?", inv.ID).
 			Updates(map[string]any{
@@ -266,6 +273,21 @@ func (s *InvitationService) Accept(ctx context.Context, db *gorm.DB, in AcceptIn
 }
 
 // ── internal ──────────────────────────────────────────────────────────────────
+
+// matchesRecipient checks that the accepting user's email or phone matches
+// the invitation's intended recipient. If the invitation targets an email,
+// the user must have that email. Same for phone. This prevents users from
+// accepting invitations that were not sent to them.
+func matchesRecipient(inv *Invitation, userEmail, userPhone *string) bool {
+	if inv.Email != nil {
+		return userEmail != nil && *userEmail == *inv.Email
+	}
+	if inv.Phone != nil {
+		return userPhone != nil && *userPhone == *inv.Phone
+	}
+	// Invitation has neither email nor phone -- allow (defensive).
+	return true
+}
 
 func (s *InvitationService) publish(ctx context.Context, subject string, payload map[string]any) {
 	if s.bus == nil {
