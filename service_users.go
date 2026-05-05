@@ -10,6 +10,7 @@ import (
 
 	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // UserService provides business logic for user lifecycle operations.
@@ -102,6 +103,7 @@ type UpdateUserInput struct {
 	AvatarURL *string
 	Locale    *string
 	Timezone  *string
+	Metadata  json.RawMessage
 }
 
 // Update patches user fields and publishes iam.user.updated.
@@ -124,6 +126,9 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 	}
 	if in.Timezone != nil {
 		updates["timezone"] = *in.Timezone
+	}
+	if len(in.Metadata) > 0 {
+		updates["metadata"] = gorm.Expr("COALESCE(metadata, '{}'::jsonb) || ?::jsonb", sdk.JSONB(in.Metadata))
 	}
 	if len(updates) == 0 {
 		return s.repo.FindUserByID(ctx, id)

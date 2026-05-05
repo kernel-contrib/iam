@@ -1,6 +1,8 @@
 package iam
 
 import (
+	"encoding/json"
+
 	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 )
@@ -8,18 +10,23 @@ import (
 // ── Request types ─────────────────────────────────────────────────────────────
 
 type updateMeRequest struct {
-	Email     *string `json:"email"`
-	Phone     *string `json:"phone"`
-	Name      *string `json:"name"`
-	AvatarURL *string `json:"avatar_url"`
-	Locale    *string `json:"locale"`
+	Email     *string         `json:"email"`
+	Phone     *string         `json:"phone"`
+	Name      *string         `json:"name"`
+	AvatarURL *string         `json:"avatar_url"`
+	Locale    *string         `json:"locale"`
+	Metadata  json.RawMessage `json:"metadata"`
 }
 
 // ── Self-service handlers ─────────────────────────────────────────────────────
 
 // handleGetMe returns the authenticated user's profile.
 func (m *Module) handleGetMe(c *gin.Context) {
-	uid := userID(c)
+	uid, err := resolveInternalUserID(c, m.repo)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
 
 	user, err := m.users.GetByID(c.Request.Context(), uid)
 	if err != nil {
@@ -32,7 +39,11 @@ func (m *Module) handleGetMe(c *gin.Context) {
 
 // handleUpdateMe updates the authenticated user's own profile.
 func (m *Module) handleUpdateMe(c *gin.Context) {
-	uid := userID(c)
+	uid, err := resolveInternalUserID(c, m.repo)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
 
 	var req updateMeRequest
 	if !sdk.BindAndValidate(c, &req) {
@@ -45,6 +56,7 @@ func (m *Module) handleUpdateMe(c *gin.Context) {
 		Name:      req.Name,
 		AvatarURL: req.AvatarURL,
 		Locale:    req.Locale,
+		Metadata:  req.Metadata,
 	})
 	if err != nil {
 		sdk.FromError(c, err)
@@ -62,7 +74,11 @@ func (m *Module) handleUpdateMe(c *gin.Context) {
 
 // handleEraseMe triggers GDPR erasure for the authenticated user.
 func (m *Module) handleEraseMe(c *gin.Context) {
-	uid := userID(c)
+	uid, err := resolveInternalUserID(c, m.repo)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
 
 	if err := m.users.Erase(c.Request.Context(), uid); err != nil {
 		sdk.FromError(c, err)
@@ -80,7 +96,11 @@ func (m *Module) handleEraseMe(c *gin.Context) {
 
 // handleListMyTenants returns all tenants the authenticated user is a member of.
 func (m *Module) handleListMyTenants(c *gin.Context) {
-	uid := userID(c)
+	uid, err := resolveInternalUserID(c, m.repo)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
 
 	members, err := m.repo.ListMembershipsByUser(c.Request.Context(), uid)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	goslug "github.com/gosimple/slug"
@@ -154,4 +155,32 @@ func getUUID(c *gin.Context, key string) uuid.UUID {
 		return uuid.Nil
 	}
 	return id
+}
+
+// resolveInternalUserID resolves the IAM user's internal UUID from the auth
+// context. On tenant-scoped routes the kernel's resolveUser middleware has
+// already set "internal_user_id", so we return that. On global routes (e.g.
+// /v1/iam/me) only authenticate() runs, so we fall back to looking up the
+// user by provider + provider_id.
+func resolveInternalUserID(c *gin.Context, repo *Repository) (uuid.UUID, error) {
+	// Fast path: kernel middleware already resolved it (tenant-scoped routes).
+	if uid := userID(c); uid != uuid.Nil {
+		return uid, nil
+	}
+
+	// Slow path: global routes — look up by auth context.
+	provider := authProvider(c)
+	providerID := authProviderID(c)
+	if provider == "" || providerID == "" {
+		return uuid.Nil, sdk.Unauthorized("missing identity")
+	}
+
+	user, err := repo.FindUserByProviderID(c.Request.Context(), providerID, provider)
+	if err != nil {
+		if isNotFoundErr(err) {
+			return uuid.Nil, sdk.Unauthorized("user not registered; call POST /register first")
+		}
+		return uuid.Nil, err
+	}
+	return user.ID, nil
 }
