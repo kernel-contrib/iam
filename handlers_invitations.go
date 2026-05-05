@@ -105,10 +105,36 @@ func (m *Module) handleRevokeInvitation(c *gin.Context) {
 	sdk.NoContent(c)
 }
 
-// ── Self-service invitation acceptance ────────────────────────────────────────
+// ── Self-service invitation preview and acceptance ────────────────────────────
 
-type acceptInvitationRequest struct {
+type invitationTokenRequest struct {
 	Token string `json:"token" binding:"required"`
+}
+
+// handlePreviewInvitation validates a token and returns invitation details
+// (tenant name, role, inviter) so the frontend can show a confirmation screen.
+func (m *Module) handlePreviewInvitation(c *gin.Context) {
+	uid := userID(c)
+	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
+		return
+	}
+
+	var req invitationTokenRequest
+	if !sdk.BindAndValidate(c, &req) {
+		return
+	}
+
+	out, err := m.registration.PreviewInvitation(c.Request.Context(), AcceptInviteInput{
+		UserID: uid,
+		Token:  req.Token,
+	})
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	sdk.OK(c, out)
 }
 
 // handleAcceptInvitation is a self-service endpoint where an authenticated
@@ -123,7 +149,7 @@ func (m *Module) handleAcceptInvitation(c *gin.Context) {
 		return
 	}
 
-	var req acceptInvitationRequest
+	var req invitationTokenRequest
 	if !sdk.BindAndValidate(c, &req) {
 		return
 	}

@@ -154,6 +154,74 @@ func (s *InvitationService) Revoke(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+// ── Preview ───────────────────────────────────────────────────────────────────
+
+// PreviewInput contains the token and the requesting user's identity
+// for recipient verification.
+type PreviewInput struct {
+	RawToken  string
+	UserEmail *string
+	UserPhone *string
+}
+
+// PreviewResult contains the invitation details shown before acceptance.
+type PreviewResult struct {
+	InvitationID uuid.UUID `json:"invitation_id"`
+	TenantID     uuid.UUID `json:"tenant_id"`
+	TenantName   string    `json:"tenant_name"`
+	RoleID       uuid.UUID `json:"role_id"`
+	RoleName     string    `json:"role_name"`
+	InvitedBy    uuid.UUID `json:"invited_by"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// Preview validates an invitation token and returns its details without
+// modifying any state. Used by the frontend to show a confirmation screen
+// before the user taps "Accept".
+func (s *InvitationService) Preview(ctx context.Context, in PreviewInput) (*PreviewResult, error) {
+	hash := hashToken(in.RawToken)
+
+	inv, err := s.repo.FindInvitationByTokenHash(ctx, hash)
+	if isNotFoundErr(err) {
+		return nil, sdk.NotFound("invitation", "token")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if inv.Status != InvitationStatusPending {
+		return nil, sdk.BadRequest(fmt.Sprintf("invitation is %s", inv.Status))
+	}
+	if time.Now().After(inv.ExpiresAt) {
+		return nil, sdk.BadRequest("invitation has expired")
+	}
+
+	if !matchesRecipient(inv, in.UserEmail, in.UserPhone) {
+		return nil, sdk.Forbidden("invitation was not sent to this user")
+	}
+
+	// Fetch tenant and role names for the preview.
+	tenant, err := s.repo.FindTenantByID(ctx, inv.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("iam: fetch tenant for preview: %w", err)
+	}
+
+	role, err := s.repo.FindRoleByID(ctx, inv.RoleID)
+	if err != nil {
+		return nil, fmt.Errorf("iam: fetch role for preview: %w", err)
+	}
+
+	return &PreviewResult{
+		InvitationID: inv.ID,
+		TenantID:     inv.TenantID,
+		TenantName:   tenant.Name,
+		RoleID:       inv.RoleID,
+		RoleName:     role.Name,
+		InvitedBy:    inv.InvitedBy,
+		ExpiresAt:    inv.ExpiresAt,
+	}, nil
+}
+
 // ── Accept ────────────────────────────────────────────────────────────────────
 
 // AcceptInput contains the raw invitation token and the accepting user's identity.

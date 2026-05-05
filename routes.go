@@ -30,8 +30,9 @@ func (m *Module) registerClientRoutes(router *sdk.Router) {
 	// must already be registered (internal_user_id is required).
 	router.POST("/organizations", sdk.Self, m.handleCreateOrganization)
 
-	// Self-service invitation acceptance. Uses sdk.Self because the user
-	// must already be registered.
+	// Self-service invitation preview and acceptance. Uses sdk.Self because
+	// the user must already be registered.
+	router.POST("/invitations/preview", sdk.Self, m.handlePreviewInvitation)
 	router.POST("/invitations/accept", sdk.Self, m.handleAcceptInvitation)
 
 	// Self-service profile.

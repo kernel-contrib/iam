@@ -282,6 +282,25 @@ type AcceptInviteOutput struct {
 	Role       *Role         `json:"role"`
 }
 
+// PreviewInvitation validates a token and returns invitation details without
+// modifying state. Used by the frontend to show a confirmation screen.
+func (s *RegistrationService) PreviewInvitation(ctx context.Context, in AcceptInviteInput) (*PreviewResult, error) {
+	// Verify the user exists and is active.
+	user, err := s.users.GetByID(ctx, in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user.Status != UserStatusActive {
+		return nil, sdk.Forbidden(fmt.Sprintf("user account is %s", user.Status))
+	}
+
+	return s.invites.Preview(ctx, PreviewInput{
+		RawToken:  in.Token,
+		UserEmail: user.Email,
+		UserPhone: user.Phone,
+	})
+}
+
 // AcceptInvitation processes an invitation token for the authenticated user.
 // Delegates the transactional work to InvitationService.Accept, then handles
 // post-commit concerns (events, cache invalidation, response enrichment).

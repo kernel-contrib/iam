@@ -453,6 +453,18 @@ func (r *Repository) FindInvitationByToken(ctx context.Context, tokenHash string
 	return &inv, nil
 }
 
+// FindInvitationByTokenHash finds an invitation by token hash regardless of
+// status. Used by Preview to return meaningful errors for non-pending states.
+func (r *Repository) FindInvitationByTokenHash(ctx context.Context, tokenHash string) (*Invitation, error) {
+	var inv Invitation
+	if err := r.db.WithContext(ctx).
+		Where("token_hash = ?", tokenHash).
+		First(&inv).Error; err != nil {
+		return nil, fmt.Errorf("iam: find invitation by token hash: %w", err)
+	}
+	return &inv, nil
+}
+
 // FindInvitationByTokenForUpdate is like FindInvitationByToken but uses
 // SELECT ... FOR UPDATE SKIP LOCKED to prevent concurrent acceptance.
 func (r *Repository) FindInvitationByTokenForUpdate(ctx context.Context, tx *gorm.DB, tokenHash string) (*Invitation, error) {

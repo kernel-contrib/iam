@@ -835,6 +835,138 @@ func TestCreateOrganization_DuplicateSlug(t *testing.T) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Preview Invitation Tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+func TestPreviewInvitation_HappyPath(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	platform := h.createPlatform(t)
+	admin := h.createUser(t)
+
+	orgOut, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     admin.ID,
+		PlatformID: platform.ID,
+		Name:       "Preview Org",
+		Slug:       "preview-org-" + uuid.New().String()[:8],
+	})
+	require.NoError(t, err)
+
+	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	require.NoError(t, err)
+
+	phone := "+971504444444"
+	invOut, err := h.invites.Create(ctx, iam.CreateInvitationInput{
+		TenantID:  orgOut.Tenant.ID,
+		InvitedBy: admin.ID,
+		Phone:     &phone,
+		RoleID:    memberRole.ID,
+	})
+	require.NoError(t, err)
+
+	// Create invitee with matching phone.
+	invitee, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "preview-invitee",
+		Phone:      &phone,
+	})
+	require.NoError(t, err)
+
+	preview, err := h.registration.PreviewInvitation(ctx, iam.AcceptInviteInput{
+		UserID: invitee.ID,
+		Token:  invOut.RawToken,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, orgOut.Tenant.ID, preview.TenantID)
+	assert.Equal(t, "Preview Org", preview.TenantName)
+	assert.Equal(t, "Member", preview.RoleName)
+	assert.Equal(t, admin.ID, preview.InvitedBy)
+}
+
+func TestPreviewInvitation_WrongPhone(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	platform := h.createPlatform(t)
+	admin := h.createUser(t)
+
+	orgOut, err := h.registration.CreateOrganization(ctx, iam.CreateOrgForUserInput{
+		UserID:     admin.ID,
+		PlatformID: platform.ID,
+		Name:       "Wrong Preview Org",
+		Slug:       "wrong-preview-" + uuid.New().String()[:8],
+	})
+	require.NoError(t, err)
+
+	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	require.NoError(t, err)
+
+	phone := "+971505555555"
+	invOut, err := h.invites.Create(ctx, iam.CreateInvitationInput{
+		TenantID:  orgOut.Tenant.ID,
+		InvitedBy: admin.ID,
+		Phone:     &phone,
+		RoleID:    memberRole.ID,
+	})
+	require.NoError(t, err)
+
+	wrongPhone := "+971509999999"
+	intruder, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "preview-intruder",
+		Phone:      &wrongPhone,
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.PreviewInvitation(ctx, iam.AcceptInviteInput{
+		UserID: intruder.ID,
+		Token:  invOut.RawToken,
+	})
+	assert.True(t, isForbidden(err),
+		"wrong phone should be rejected, got: %v", err)
+}
+
+func TestPreviewInvitation_ExpiredToken(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	phone := "+971506666666"
+	_, _, rawToken, _ := setupOrgWithInvitation(t, h, phone)
+
+	// Force-expire.
+	h.db.Exec("UPDATE invitations SET expires_at = datetime('now', '-1 day')")
+
+	invitee, err := h.users.Create(ctx, iam.CreateUserInput{
+		Provider:   "firebase",
+		ProviderID: "preview-expired",
+		Phone:      &phone,
+	})
+	require.NoError(t, err)
+
+	_, err = h.registration.PreviewInvitation(ctx, iam.AcceptInviteInput{
+		UserID: invitee.ID,
+		Token:  rawToken,
+	})
+	assert.True(t, isBadRequest(err),
+		"expired invitation should be bad request, got: %v", err)
+}
+
+func TestPreviewInvitation_InvalidToken(t *testing.T) {
+	h := newTestHarness(t)
+	ctx := context.Background()
+
+	user := h.createUser(t)
+
+	_, err := h.registration.PreviewInvitation(ctx, iam.AcceptInviteInput{
+		UserID: user.ID,
+		Token:  "bogus-token",
+	})
+	assert.True(t, isNotFound(err),
+		"invalid token should be not found, got: %v", err)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Accept Invitation Tests
 // ═══════════════════════════════════════════════════════════════════════════════
 
