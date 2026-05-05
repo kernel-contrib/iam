@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
-	"go.edgescale.dev/kernel/sdk"
 )
 
 // UserService provides business logic for user lifecycle operations.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
-	"go.edgescale.dev/kernel/sdk"
 )
 
 // MemberService provides business logic for tenant membership operations.

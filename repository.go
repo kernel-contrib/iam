@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
-	"go.edgescale.dev/kernel/sdk"
 	"gorm.io/gorm"
 )
 

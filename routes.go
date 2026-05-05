@@ -1,6 +1,6 @@
 package iam
 
-import "go.edgescale.dev/kernel/sdk"
+import "github.com/edgescaleDev/kernel/sdk"
 
 // RouteHandlers mounts all HTTP endpoints on the kernel router.
 // Routes are split into two groups:

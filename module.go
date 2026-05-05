@@ -3,8 +3,8 @@ package iam
 import (
 	"io/fs"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/kernel-contrib/iam/migrations"
-	"go.edgescale.dev/kernel/sdk"
 )
 
 // Module is the EdgeScale Kernel core module for Identity and Access Management.

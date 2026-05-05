@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
-	"go.edgescale.dev/kernel/sdk"
 )
 
 // TenantService provides business logic for tenant hierarchy operations.

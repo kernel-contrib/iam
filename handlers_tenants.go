@@ -3,9 +3,9 @@ package iam
 import (
 	"fmt"
 
+	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.edgescale.dev/kernel/sdk"
 )
 
 // ── Request types ─────────────────────────────────────────────────────────────
