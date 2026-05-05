@@ -133,8 +133,9 @@ func authProvider(c *gin.Context) string {
 
 // authProviderID returns the IdP user identifier (e.g. the Firebase UID)
 // from the kernel's authenticate() middleware context.
+// The kernel stores identity.Subject as "user_id".
 func authProviderID(c *gin.Context) string {
-	if v, ok := c.Get("auth_provider_id"); ok {
+	if v, ok := c.Get("user_id"); ok {
 		if s, ok := v.(string); ok {
 			return s
 		}
