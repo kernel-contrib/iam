@@ -132,7 +132,7 @@ func (s *RegistrationService) Register(ctx context.Context, in RegisterInput) (*
 // CreateOrgForUserInput contains the fields for creating a new organization.
 type CreateOrgForUserInput struct {
 	UserID     uuid.UUID // the authenticated user who becomes admin
-	PlatformID uuid.UUID // resolved from kernel config
+	PlatformID uuid.UUID // optional; if zero, resolved automatically from the DB
 	Name       string
 	Slug       string
 	LogoURL    *string         // optional, URL or storage UUID
@@ -163,6 +163,18 @@ func (s *RegistrationService) CreateOrganization(ctx context.Context, in CreateO
 	}
 	if err := validateSlug(in.Slug); err != nil {
 		return nil, sdk.BadRequest(err.Error())
+	}
+
+	// Auto-resolve platform tenant when the caller doesn't provide one.
+	// This allows cross-module callers (e.g., onboarding module) to create
+	// orgs without needing access to IAM's private platformTenantID() helper.
+	if in.PlatformID == uuid.Nil {
+		repo := NewRepository(s.db)
+		pt, err := repo.FindPlatformTenant(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("iam: resolve platform tenant: %w", err)
+		}
+		in.PlatformID = pt.ID
 	}
 
 	// Fetch the platform tenant (needed for depth and path computation).
