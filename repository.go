@@ -284,21 +284,34 @@ func (r *Repository) FindMemberInAncestorChain(ctx context.Context, userID, tena
 		return nil, err
 	}
 
-	// Collect all tenant IDs in the chain: self + ancestors.
+	// Collect all tenant IDs in the chain: ancestors (root->leaf) + self.
+	// The slice is ordered from shallowest to deepest, so the last
+	// element is the most-specific tenant.
 	chainIDs := append(parsePath(tenant.Path), tenantID)
 
 	var members []TenantMember
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ? AND tenant_id IN ?", userID, chainIDs).
-		Joins("JOIN tenants ON tenants.id = tenant_members.tenant_id").
-		Order("tenants.depth DESC").
 		Find(&members).Error; err != nil {
 		return nil, fmt.Errorf("iam: find member in ancestor chain: %w", err)
 	}
 	if len(members) == 0 {
 		return nil, gorm.ErrRecordNotFound
 	}
-	return &members[0], nil
+
+	// Return the deepest (most-specific) membership by matching against
+	// the chain order. Walk from deepest to shallowest.
+	index := make(map[uuid.UUID]int, len(chainIDs))
+	for i, id := range chainIDs {
+		index[id] = i
+	}
+	best := members[0]
+	for _, m := range members[1:] {
+		if index[m.TenantID] > index[best.TenantID] {
+			best = m
+		}
+	}
+	return &best, nil
 }
 
 // ── Roles ─────────────────────────────────────────────────────────────────────
