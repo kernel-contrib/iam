@@ -179,3 +179,14 @@ func (mr *MemberRole) BeforeCreate(_ *gorm.DB) error {
 	}
 	return nil
 }
+
+// ── Tenant Access ─────────────────────────────────────────────────────────────
+
+// TenantAccess combines a membership with its assigned roles and resolved
+// effective permissions. Used by aggregation endpoints (e.g. home feed) to
+// return everything the client needs in a single roundtrip.
+type TenantAccess struct {
+	TenantMember
+	Roles       []MemberRole `json:"roles"`
+	Permissions []string     `json:"permissions"`
+}
