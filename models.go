@@ -51,6 +51,7 @@ type TenantMember = types.TenantMember
 type Role = types.Role
 type RolePermission = types.RolePermission
 type MemberRole = types.MemberRole
+type TenantAccess = types.TenantAccess
 
 // ── Invitation ────────────────────────────────────────────────────────────────
 

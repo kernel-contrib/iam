@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/edgescaleDev/kernel/sdk"
@@ -50,6 +51,12 @@ type IAMReader interface {
 	// ── Permissions ───────────────────────────────────────────────────
 	ResolvePermissions(ctx context.Context, userID, tenantID uuid.UUID) ([]string, error)
 	HasPermission(ctx context.Context, userID, tenantID uuid.UUID, perm string) (bool, error)
+
+	// ── Aggregation ───────────────────────────────────────────────────
+	// GetUserAccess returns all tenant memberships for a user, each
+	// enriched with assigned roles and resolved permissions. Designed
+	// for aggregation endpoints (e.g. home feed) to avoid N+1 roundtrips.
+	GetUserAccess(ctx context.Context, userID uuid.UUID) ([]TenantAccess, error)
 
 	// ── Auth Providers ───────────────────────────────────────────────
 	// GetAllowedProviders returns the list of enabled auth provider names
@@ -178,6 +185,36 @@ func (r *iamReader) HasPermission(ctx context.Context, userID, tenantID uuid.UUI
 		}
 	}
 	return false, nil
+}
+
+// ── Aggregation ───────────────────────────────────────────────────────────────
+
+func (r *iamReader) GetUserAccess(ctx context.Context, userID uuid.UUID) ([]TenantAccess, error) {
+	members, err := r.repo.ListMembershipsByUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("iam: get user access: %w", err)
+	}
+
+	result := make([]TenantAccess, 0, len(members))
+	for _, mem := range members {
+		roles, err := r.roles.GetMemberRoles(ctx, mem.ID)
+		if err != nil {
+			return nil, fmt.Errorf("iam: get user access roles: %w", err)
+		}
+
+		perms, err := r.ResolvePermissions(ctx, userID, mem.TenantID)
+		if err != nil {
+			return nil, fmt.Errorf("iam: get user access permissions: %w", err)
+		}
+
+		result = append(result, TenantAccess{
+			TenantMember: mem,
+			Roles:        roles,
+			Permissions:  perms,
+		})
+	}
+
+	return result, nil
 }
 
 // ── Auth Providers ────────────────────────────────────────────────────────────
