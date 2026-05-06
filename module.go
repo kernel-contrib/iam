@@ -187,3 +187,68 @@ func (m *Module) platformTenantID(ctx context.Context) (uuid.UUID, error) {
 
 	return platform.ID, nil
 }
+
+// ResolveUser satisfies sdk.UserResolver. It resolves an external identity
+// into a tenant-scoped internal user with permissions.
+//
+// When tenantID is uuid.Nil, it performs identity-only resolution: returns the
+// internal user UUID without checking membership or resolving permissions.
+// This is used by global (non-tenant) routes to identify the caller.
+func (m *Module) ResolveUser(ctx context.Context, provider, externalID string, tenantID uuid.UUID) (*sdk.ResolvedUser, error) {
+	user, err := m.repo.FindUserByProviderID(ctx, externalID, provider)
+	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// Identity-only resolution: no tenant context, no membership or
+	// permission checks. Used for global authenticated routes.
+	if tenantID == uuid.Nil {
+		return &sdk.ResolvedUser{InternalID: user.ID}, nil
+	}
+
+	// Verify membership in this tenant (or its ancestor chain).
+	ok, err := m.members.IsMemberAnywhere(ctx, user.ID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	perms, err := m.roles.ResolvePermissions(ctx, user.ID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &sdk.ResolvedUser{
+		InternalID:  user.ID,
+		Permissions: perms,
+	}, nil
+}
+
+// ResolveAdmin satisfies sdk.AdminResolver. It resolves an external identity
+// into a platform-level admin with permissions.
+func (m *Module) ResolveAdmin(ctx context.Context, provider, externalID string) (*sdk.ResolvedUser, error) {
+	user, err := m.repo.FindUserByProviderID(ctx, externalID, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	platformID, err := m.platformTenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	perms, err := m.roles.ResolvePermissions(ctx, user.ID, platformID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &sdk.ResolvedUser{
+		InternalID:  user.ID,
+		Permissions: perms,
+	}, nil
+}
