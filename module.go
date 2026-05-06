@@ -139,11 +139,13 @@ func (m *Module) Init(ctx sdk.Context) error {
 	)
 
 	// Register the reader for cross-module consumption.
-	// Other modules resolve it via: sdk.Reader[iam.IAMReader](&m.ctx, "iam")
+	// Other modules resolve reads via: sdk.Reader[iam.IAMReader](&m.ctx, "iam")
+	// Other modules resolve writes via: sdk.Reader[iam.IAMRegistrar](&m.ctx, "iam")
 	ctx.RegisterReader(&iamReader{
-		repo:  m.repo,
-		roles: m.roles,
-		redis: ctx.Redis,
+		iamRegistrar: &iamRegistrar{registration: m.registration},
+		repo:         m.repo,
+		roles:        m.roles,
+		redis:        ctx.Redis,
 	})
 
 	ctx.Logger.Info("iam module initialized")

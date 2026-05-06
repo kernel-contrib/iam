@@ -63,7 +63,12 @@ type IAMReader interface {
 // iamReader is the unexported implementation registered with the kernel.
 // It wraps the repository for DB access, the RoleService for RBAC
 // resolution, and the SDK Redis client for caching.
+//
+// The embedded iamRegistrar provides write operations (CreateOrganization,
+// Register) so that a single RegisterReader call satisfies both
+// IAMReader and IAMRegistrar interfaces via Go's implicit composition.
 type iamReader struct {
+	*iamRegistrar
 	repo  *Repository
 	roles *RoleService
 	redis sdk.NamespacedRedis
