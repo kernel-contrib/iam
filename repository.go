@@ -233,7 +233,7 @@ func (r *Repository) FindMembersByIDs(ctx context.Context, tenantID uuid.UUID, i
 
 func (r *Repository) ListMembers(ctx context.Context, tenantID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[TenantMember], error) {
 	return sdk.Paginate[TenantMember](
-		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Preload("User"),
+		r.db.WithContext(ctx).Model(&TenantMember{}).Where("tenant_id = ?", tenantID).Preload("User"),
 		page,
 	)
 }
@@ -535,7 +535,7 @@ func (r *Repository) UpdateInvitation(ctx context.Context, id uuid.UUID, updates
 
 func (r *Repository) ListInvitations(ctx context.Context, tenantID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[Invitation], error) {
 	return sdk.Paginate[Invitation](
-		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
+		r.db.WithContext(ctx).Model(&Invitation{}).Where("tenant_id = ?", tenantID),
 		page,
 	)
 }
