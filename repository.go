@@ -231,6 +231,24 @@ func (r *Repository) FindMembersByIDs(ctx context.Context, tenantID uuid.UUID, i
 	return result, nil
 }
 
+// SearchMembersByName searches tenant members by user display name across all
+// locale variants stored in the JSONB name column (e.g. "base", "ar", ...).
+// Returns matching member IDs for use as a filter in other modules' queries.
+func (r *Repository) SearchMembersByName(ctx context.Context, tenantID uuid.UUID, query string) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	pattern := "%" + query + "%"
+	err := r.db.WithContext(ctx).
+		Model(&TenantMember{}).
+		Select("tenant_members.id").
+		Joins("JOIN users ON users.id = tenant_members.user_id").
+		Where("tenant_members.tenant_id = ? AND EXISTS (SELECT 1 FROM jsonb_each_text(users.name) AS kv WHERE kv.value ILIKE ?)", tenantID, pattern).
+		Scan(&ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("iam: search members by name: %w", err)
+	}
+	return ids, nil
+}
+
 func (r *Repository) ListMembers(ctx context.Context, tenantID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[TenantMember], error) {
 	return sdk.Paginate[TenantMember](
 		r.db.WithContext(ctx).Model(&TenantMember{}).Where("tenant_id = ?", tenantID).Preload("User"),

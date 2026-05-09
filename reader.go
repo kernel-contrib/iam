@@ -45,6 +45,7 @@ type IAMReader interface {
 	// ── Members ───────────────────────────────────────────────────────
 	GetMember(ctx context.Context, userID, tenantID uuid.UUID) (*TenantMember, error)
 	GetMembersByIDs(ctx context.Context, tenantID uuid.UUID, memberIDs []uuid.UUID) (map[uuid.UUID]TenantMember, error)
+	SearchMembersByName(ctx context.Context, tenantID uuid.UUID, query string) ([]uuid.UUID, error)
 	IsMember(ctx context.Context, userID, tenantID uuid.UUID) (bool, error)
 	IsMemberAnywhere(ctx context.Context, userID, tenantID uuid.UUID) (bool, error)
 
@@ -138,6 +139,10 @@ func (r *iamReader) GetMember(ctx context.Context, userID, tenantID uuid.UUID) (
 
 func (r *iamReader) GetMembersByIDs(ctx context.Context, tenantID uuid.UUID, memberIDs []uuid.UUID) (map[uuid.UUID]TenantMember, error) {
 	return r.repo.FindMembersByIDs(ctx, tenantID, memberIDs)
+}
+
+func (r *iamReader) SearchMembersByName(ctx context.Context, tenantID uuid.UUID, query string) ([]uuid.UUID, error) {
+	return r.repo.SearchMembersByName(ctx, tenantID, query)
 }
 
 func (r *iamReader) IsMember(ctx context.Context, userID, tenantID uuid.UUID) (bool, error) {
