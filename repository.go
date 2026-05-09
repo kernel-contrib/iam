@@ -237,11 +237,19 @@ func (r *Repository) FindMembersByIDs(ctx context.Context, tenantID uuid.UUID, i
 func (r *Repository) SearchMembersByName(ctx context.Context, tenantID uuid.UUID, query string) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
 	pattern := "%" + query + "%"
+	// Use the GORM NamingStrategy to resolve schema-qualified table names.
+	// Raw SQL bypasses the NamingStrategy, so we must qualify manually.
+	memberTable := r.db.NamingStrategy.TableName("tenant_members")
+	userTable := r.db.NamingStrategy.TableName("users")
+
+	joinClause := fmt.Sprintf("JOIN %s ON %s.id = %s.user_id", userTable, userTable, memberTable)
+	whereClause := fmt.Sprintf("%s.tenant_id = ? AND EXISTS (SELECT 1 FROM jsonb_each_text(%s.name) AS kv WHERE kv.value ILIKE ?)", memberTable, userTable)
+
 	err := r.db.WithContext(ctx).
 		Model(&TenantMember{}).
-		Select("tenant_members.id").
-		Joins("JOIN users ON users.id = tenant_members.user_id").
-		Where("tenant_members.tenant_id = ? AND EXISTS (SELECT 1 FROM jsonb_each_text(users.name) AS kv WHERE kv.value ILIKE ?)", tenantID, pattern).
+		Select(memberTable+".id").
+		Joins(joinClause).
+		Where(whereClause, tenantID, pattern).
 		Scan(&ids).Error
 	if err != nil {
 		return nil, fmt.Errorf("iam: search members by name: %w", err)
