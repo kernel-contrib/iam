@@ -212,11 +212,11 @@ func (m *Module) ResolveUser(ctx context.Context, provider, externalID string, t
 	}
 
 	// Verify membership in this tenant (or its ancestor chain).
-	ok, err := m.members.IsMemberAnywhere(ctx, user.ID, tenantID)
+	member, err := m.members.IsMemberAnywhere(ctx, user.ID, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	if member == nil {
 		return nil, nil
 	}
 
@@ -227,6 +227,7 @@ func (m *Module) ResolveUser(ctx context.Context, provider, externalID string, t
 
 	return &sdk.ResolvedUser{
 		InternalID:  user.ID,
+		MemberID:    member.ID,
 		Permissions: perms,
 	}, nil
 }

@@ -56,15 +56,16 @@ func (s *MemberService) IsMember(ctx context.Context, userID, tenantID uuid.UUID
 
 // IsMemberAnywhere checks whether a user has a membership in the tenant
 // or any of its ancestors (i.e. they have access through the hierarchy).
-func (s *MemberService) IsMemberAnywhere(ctx context.Context, userID, tenantID uuid.UUID) (bool, error) {
-	_, err := s.repo.FindMemberInAncestorChain(ctx, userID, tenantID)
+// Returns the resolved membership record, or nil if not a member.
+func (s *MemberService) IsMemberAnywhere(ctx context.Context, userID, tenantID uuid.UUID) (*TenantMember, error) {
+	member, err := s.repo.FindMemberInAncestorChain(ctx, userID, tenantID)
 	if isNotFoundErr(err) {
-		return false, nil
+		return nil, nil
 	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return true, nil
+	return member, nil
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────────────
