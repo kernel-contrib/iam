@@ -190,6 +190,13 @@ func (m *Module) platformTenantID(ctx context.Context) (uuid.UUID, error) {
 	return platform.ID, nil
 }
 
+// ResolvePlatformTenantID satisfies sdk.PlatformTenantResolver.
+// This allows the consumer to pass the IAM module directly to
+// kernel.SetPlatformTenantResolver(iamModule).
+func (m *Module) ResolvePlatformTenantID(ctx context.Context) (uuid.UUID, error) {
+	return m.platformTenantID(ctx)
+}
+
 // ResolveUser satisfies sdk.UserResolver. It resolves an external identity
 // into a tenant-scoped internal user with permissions.
 //

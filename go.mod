@@ -3,7 +3,7 @@ module github.com/kernel-contrib/iam
 go 1.26.1
 
 require (
-	github.com/edgescaleDev/kernel v0.4.3
+	github.com/edgescaleDev/kernel v0.5.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.15.0
