@@ -145,7 +145,25 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, in UpdateUserInp
 	}
 
 	s.invalidateUser(ctx, id)
-	s.publish(ctx, "iam.user.updated", map[string]any{"user_id": id})
+
+	// Publish enriched event with changed fields for downstream subscribers
+	// (e.g., auth-firebase syncing email/phone back to the identity provider).
+	payload := map[string]any{
+		"user_id":     id,
+		"provider":    u.Provider,
+		"provider_id": u.ProviderID,
+	}
+	if in.Email != nil {
+		payload["email"] = *in.Email
+	}
+	if in.Phone != nil {
+		payload["phone"] = *in.Phone
+	}
+	if in.Name != nil {
+		payload["name"] = *in.Name
+	}
+	s.publish(ctx, "iam.user.updated", payload)
+
 	return u, nil
 }
 

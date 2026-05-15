@@ -15,6 +15,7 @@ type updateMeRequest struct {
 	Name      *string         `json:"name"`
 	AvatarURL *string         `json:"avatar_url"`
 	Locale    *string         `json:"locale"`
+	Timezone  *string         `json:"timezone"`
 	Metadata  json.RawMessage `json:"metadata"`
 }
 
@@ -57,6 +58,7 @@ func (m *Module) handleUpdateMe(c *gin.Context) {
 		AvatarURL: req.AvatarURL,
 		Locale:    req.Locale,
 		Metadata:  req.Metadata,
+		Timezone:  req.Timezone,
 	})
 	if err != nil {
 		sdk.FromError(c, err)
