@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
+	"github.com/kernel-contrib/sdk"
 )
 
 // RoleService provides business logic for RBAC operations.
@@ -73,8 +73,9 @@ func (s *RoleService) Create(ctx context.Context, in CreateRoleInput) (*Role, er
 		return nil, sdk.BadRequest(err.Error())
 	}
 
+	tid := in.TenantID
 	role := &Role{
-		TenantID:    in.TenantID,
+		TenantID:    &tid,
 		Name:        in.Name,
 		Slug:        in.Slug,
 		Description: in.Description,
@@ -195,7 +196,9 @@ func (s *RoleService) SetPermissions(ctx context.Context, roleID uuid.UUID, keys
 
 // ── Role Assignment ───────────────────────────────────────────────────────────
 
-// AssignToMember assigns a role to a member. Both must belong to the same tenant.
+// AssignToMember assigns a role to a member.
+// System roles (global, tenant_id = nil) can be assigned to any member.
+// Custom roles must belong to the same tenant as the member.
 func (s *RoleService) AssignToMember(ctx context.Context, memberID, roleID uuid.UUID) error {
 	member, err := s.repo.FindMember(ctx, memberID)
 	if isNotFoundErr(err) {
@@ -213,8 +216,9 @@ func (s *RoleService) AssignToMember(ctx context.Context, memberID, roleID uuid.
 		return err
 	}
 
-	// Roles must belong to the same tenant as the membership.
-	if member.TenantID != role.TenantID {
+	// System roles (tenant_id = nil) are global and can be assigned to any tenant.
+	// Custom roles must belong to the same tenant as the membership.
+	if role.TenantID != nil && *role.TenantID != member.TenantID {
 		return sdk.BadRequest("role and member must belong to the same tenant")
 	}
 

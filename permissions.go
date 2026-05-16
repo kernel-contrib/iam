@@ -1,6 +1,6 @@
 package iam
 
-import "github.com/edgescaleDev/kernel/sdk"
+import "github.com/kernel-contrib/sdk"
 
 // Simplified permission keys (preferred for new code)
 //

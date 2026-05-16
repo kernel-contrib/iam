@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	iam "github.com/kernel-contrib/iam"
+	"github.com/kernel-contrib/sdk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -57,10 +57,13 @@ func newTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE roles (
 			id TEXT PRIMARY KEY,
 			created_at DATETIME, updated_at DATETIME, deleted_at DATETIME,
-			tenant_id TEXT NOT NULL, name TEXT NOT NULL, slug TEXT NOT NULL,
+			tenant_id TEXT, name TEXT NOT NULL, slug TEXT NOT NULL,
 			description TEXT, is_system INTEGER NOT NULL DEFAULT 0
 		)`,
-		`CREATE UNIQUE INDEX idx_roles_tenant_slug ON roles(tenant_id, slug)`,
+		`CREATE UNIQUE INDEX idx_roles_tenant_slug ON roles(tenant_id, slug)
+			WHERE deleted_at IS NULL AND tenant_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX idx_roles_system_slug ON roles(slug)
+			WHERE deleted_at IS NULL AND tenant_id IS NULL`,
 		`CREATE TABLE role_permissions (
 			id TEXT PRIMARY KEY,
 			role_id TEXT NOT NULL, permission_key TEXT NOT NULL,
@@ -130,43 +133,13 @@ func newTestHarness(t *testing.T) *testHarness {
 	roles := iam.NewRoleService(repo, bus, tctx.Redis, log, nil)
 	invites := iam.NewInvitationService(repo, bus, log)
 
-	// seedSystemRoles needs the Module, but for unit tests we create
-	// a simple provision function that delegates to roles.
-	seedFn := func(ctx context.Context, tenantID uuid.UUID) (*iam.Role, error) {
-		defs := []struct {
-			Name, Slug, Desc string
-			Perms            []string
-		}{
-			{"Admin", "admin", "Full access", []string{"*"}},
-			{"Manager", "manager", "Manage access", []string{"iam.tenants.read", "iam.members.read"}},
-			{"Member", "member", "Basic access", []string{"iam.tenants.read"}},
-		}
-		var adminRole *iam.Role
-		for _, d := range defs {
-			desc := d.Desc
-			role := &iam.Role{
-				TenantID:    tenantID,
-				Name:        d.Name,
-				Slug:        d.Slug,
-				Description: &desc,
-				IsSystem:    true,
-			}
-			if err := repo.CreateRole(ctx, role); err != nil {
-				return nil, err
-			}
-			if err := repo.SetRolePermissions(ctx, role.ID, d.Perms); err != nil {
-				return nil, err
-			}
-			if d.Slug == "admin" {
-				adminRole = role
-			}
-		}
-		return adminRole, nil
-	}
+	// Seed the 3 global system roles (admin, manager, member) like the
+	// migration does in production. These have tenant_id = NULL.
+	seedGlobalSystemRoles(t, repo)
 
 	registration := iam.NewRegistrationService(
 		users, tenants, members, roles, invites,
-		seedFn, db, bus, tctx.Redis, log,
+		repo, db, bus, tctx.Redis, log,
 	)
 
 	return &testHarness{
@@ -179,6 +152,35 @@ func newTestHarness(t *testing.T) *testHarness {
 		roles:        roles,
 		invites:      invites,
 		registration: registration,
+	}
+}
+
+// seedGlobalSystemRoles creates the 3 global system roles in the test DB.
+func seedGlobalSystemRoles(t *testing.T, repo *iam.Repository) {
+	t.Helper()
+	ctx := context.Background()
+
+	defs := []struct {
+		Name, Slug, Desc string
+		Perms            []string
+	}{
+		{"Admin", "admin", "Full access", []string{"*"}},
+		{"Manager", "manager", "Manage access", []string{"iam.read", "iam.write"}},
+		{"Member", "member", "Basic access", []string{"iam.read"}},
+	}
+
+	for _, d := range defs {
+		desc := d.Desc
+		role := &iam.Role{
+			TenantID:    nil, // global system role
+			Name:        d.Name,
+			Slug:        d.Slug,
+			Description: &desc,
+			IsSystem:    true,
+		}
+		role.ID = uuid.New()
+		require.NoError(t, repo.CreateRole(ctx, role))
+		require.NoError(t, repo.SetRolePermissions(ctx, role.ID, d.Perms))
 	}
 }
 
@@ -552,14 +554,10 @@ func TestRoleCreate(t *testing.T) {
 func TestRoleDelete_SystemBlocked(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
-	platform := h.createPlatform(t)
-	org, _ := h.tenants.CreateOrg(ctx, iam.CreateOrgInput{
-		Slug: "sys-role", Name: "Sys Role", PlatformID: platform.ID,
-	})
 
-	// Create a system role directly.
+	// Create a system role directly (global, tenant_id = nil).
 	desc := "system"
-	role := &iam.Role{TenantID: org.ID, Name: "Admin", Slug: "admin", Description: &desc, IsSystem: true}
+	role := &iam.Role{TenantID: nil, Name: "Custom Admin", Slug: "custom-admin", Description: &desc, IsSystem: true}
 	role.ID = uuid.New()
 	require.NoError(t, h.repo.CreateRole(ctx, role))
 
@@ -570,13 +568,9 @@ func TestRoleDelete_SystemBlocked(t *testing.T) {
 func TestRoleUpdate_SystemBlocked(t *testing.T) {
 	h := newTestHarness(t)
 	ctx := context.Background()
-	platform := h.createPlatform(t)
-	org, _ := h.tenants.CreateOrg(ctx, iam.CreateOrgInput{
-		Slug: "sys-upd", Name: "Sys Upd", PlatformID: platform.ID,
-	})
 
 	desc := "system"
-	role := &iam.Role{TenantID: org.ID, Name: "Admin", Slug: "admin", Description: &desc, IsSystem: true}
+	role := &iam.Role{TenantID: nil, Name: "Custom Admin 2", Slug: "custom-admin-2", Description: &desc, IsSystem: true}
 	role.ID = uuid.New()
 	require.NoError(t, h.repo.CreateRole(ctx, role))
 
@@ -853,7 +847,7 @@ func TestPreviewInvitation_HappyPath(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	memberRole, err := h.repo.FindSystemRoleBySlug(ctx, "member")
 	require.NoError(t, err)
 
 	phone := "+971504444444"
@@ -899,7 +893,7 @@ func TestPreviewInvitation_WrongPhone(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	memberRole, err := h.repo.FindSystemRoleBySlug(ctx, "member")
 	require.NoError(t, err)
 
 	phone := "+971505555555"
@@ -993,8 +987,8 @@ func setupOrgWithInvitation(t *testing.T, h *testHarness, phone string) (
 	require.NoError(t, err)
 	org = orgOut.Tenant
 
-	// Find the "member" role for the invitation.
-	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", org.ID)
+	// Find the global "member" system role for the invitation.
+	memberRole, err := h.repo.FindSystemRoleBySlug(ctx, "member")
 	require.NoError(t, err)
 	roleID = memberRole.ID
 
@@ -1056,7 +1050,7 @@ func TestAcceptInvitation_HappyPath_Email(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	memberRole, err := h.repo.FindSystemRoleBySlug(ctx, "member")
 	require.NoError(t, err)
 
 	email := "invitee@example.com"
@@ -1122,7 +1116,7 @@ func TestAcceptInvitation_WrongEmail(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	memberRole, err := h.repo.FindRoleBySlugAndTenant(ctx, "member", orgOut.Tenant.ID)
+	memberRole, err := h.repo.FindSystemRoleBySlug(ctx, "member")
 	require.NoError(t, err)
 
 	targetEmail := "correct@example.com"

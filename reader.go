@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/edgescaleDev/kernel/sdk"
+	"github.com/kernel-contrib/sdk"
 	"github.com/google/uuid"
 )
 

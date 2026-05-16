@@ -6,9 +6,9 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/migrations"
+	"github.com/kernel-contrib/sdk"
 )
 
 // Module is the EdgeScale Kernel core module for Identity and Access Management.
@@ -51,18 +51,18 @@ func (m *Module) Manifest() sdk.Manifest {
 
 		Permissions: []sdk.Permission{
 			// Simplified keys (preferred for new code).
-			{Key: PermRead, Label: sdk.T("View IAM resources", "ar", "عرض موارد الهوية")},
-			{Key: PermWrite, Label: sdk.T("Manage IAM resources", "ar", "إدارة موارد الهوية")},
+			{Key: PermRead, Label: sdk.T("View IAM resources", "ar", "عرض موارد الهوية"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermWrite, Label: sdk.T("Manage IAM resources", "ar", "إدارة موارد الهوية"), DefaultRoles: []string{sdk.RoleManager}},
 			// Legacy keys (kept for 3-5 releases).
-			{Key: PermTenantsRead, Label: sdk.T("View tenant details", "ar", "عرض تفاصيل المستأجر")},
-			{Key: PermTenantsManage, Label: sdk.T("Create, update, and delete tenants", "ar", "إنشاء وتعديل وحذف المستأجرين")},
-			{Key: PermMembersRead, Label: sdk.T("View members", "ar", "عرض الأعضاء")},
-			{Key: PermMembersManage, Label: sdk.T("Add, update, and remove members", "ar", "إضافة وتعديل وإزالة الأعضاء")},
-			{Key: PermRolesRead, Label: sdk.T("View roles", "ar", "عرض الأدوار")},
-			{Key: PermRolesManage, Label: sdk.T("Create, update, and delete roles", "ar", "إنشاء وتعديل وحذف الأدوار")},
-			{Key: PermInvitationsRead, Label: sdk.T("View invitations", "ar", "عرض الدعوات")},
-			{Key: PermInvitationsManage, Label: sdk.T("Create and revoke invitations", "ar", "إنشاء وإلغاء الدعوات")},
-			{Key: PermPermissionsRead, Label: sdk.T("View permissions catalog", "ar", "عرض كتالوج الصلاحيات")},
+			{Key: PermTenantsRead, Label: sdk.T("View tenant details", "ar", "عرض تفاصيل المستأجر"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermTenantsManage, Label: sdk.T("Create, update, and delete tenants", "ar", "إنشاء وتعديل وحذف المستأجرين"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermMembersRead, Label: sdk.T("View members", "ar", "عرض الأعضاء"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermMembersManage, Label: sdk.T("Add, update, and remove members", "ar", "إضافة وتعديل وإزالة الأعضاء"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermRolesRead, Label: sdk.T("View roles", "ar", "عرض الأدوار"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermRolesManage, Label: sdk.T("Create, update, and delete roles", "ar", "إنشاء وتعديل وحذف الأدوار"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermInvitationsRead, Label: sdk.T("View invitations", "ar", "عرض الدعوات"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermInvitationsManage, Label: sdk.T("Create and revoke invitations", "ar", "إنشاء وإلغاء الدعوات"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermPermissionsRead, Label: sdk.T("View permissions catalog", "ar", "عرض كتالوج الصلاحيات"), DefaultRoles: []string{sdk.RoleManager}},
 		},
 
 		PublicEvents: []sdk.EventDef{
@@ -134,7 +134,7 @@ func (m *Module) Init(ctx sdk.Context) error {
 	m.invitations = NewInvitationService(m.repo, ctx.Bus, ctx.Logger)
 	m.registration = NewRegistrationService(
 		m.users, m.tenants, m.members, m.roles, m.invitations,
-		m.seedSystemRoles, // shared provisioning logic (provision.go)
+		m.repo, // used to look up global system roles
 		ctx.DB, ctx.Bus, ctx.Redis, ctx.Logger,
 	)
 
@@ -161,9 +161,16 @@ func (m *Module) Init(ctx sdk.Context) error {
 		redis:        ctx.Redis,
 		audit:        ctx.Audit,
 		db:           ctx.DB,
-		seedRoles:    m.seedSystemRoles,
 	}
 	ctx.RegisterClient(m.client)
+
+	// Reconcile global system role permissions with the latest module
+	// manifests. This ensures new permissions from newly deployed modules
+	// are added, and stale permissions from removed modules are pruned.
+	// Touches only 3 role rows regardless of tenant count.
+	if err := m.reconcileSystemRoles(context.Background()); err != nil {
+		return fmt.Errorf("iam: reconcile system roles: %w", err)
+	}
 
 	ctx.Logger.Info("iam module initialized")
 	return nil

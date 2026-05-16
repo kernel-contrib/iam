@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 	"gorm.io/gorm"
 )
 
@@ -84,10 +84,9 @@ type CreateTenantInput struct {
 	Slug       string    // auto-generated from Name if empty
 }
 
-// CreateTenantOutput returns the new tenant and auto-seeded admin role.
+// CreateTenantOutput returns the new tenant.
 type CreateTenantOutput struct {
-	Tenant    *Tenant `json:"tenant"`
-	AdminRole *Role   `json:"admin_role"`
+	Tenant *Tenant `json:"tenant"`
 }
 
 // Implementation:
@@ -104,7 +103,6 @@ type iamClient struct {
 	redis        sdk.NamespacedRedis
 	audit        sdk.AuditLogger
 	db           *gorm.DB
-	seedRoles    func(ctx context.Context, tenantID uuid.UUID) (*Role, error)
 }
 
 // Users:
@@ -226,7 +224,8 @@ func (c *iamClient) GetTenantBySlug(ctx context.Context, slug string) (*Tenant, 
 }
 
 func (c *iamClient) CreateTenant(ctx context.Context, in CreateTenantInput) (*CreateTenantOutput, error) {
-	// Create the org tenant.
+	// Create the org tenant. System roles are global and already exist;
+	// no per-tenant seeding needed.
 	tenant, err := c.tenants.CreateOrg(ctx, CreateOrgInput{
 		PlatformID: in.PlatformID,
 		Name:       in.Name,
@@ -236,19 +235,13 @@ func (c *iamClient) CreateTenant(ctx context.Context, in CreateTenantInput) (*Cr
 		return nil, err
 	}
 
-	// Seed system roles.
-	adminRole, err := c.seedRoles(ctx, tenant.ID)
-	if err != nil {
-		return nil, fmt.Errorf("iam: seed roles for new tenant: %w", err)
-	}
-
 	c.audit.Log(ctx, sdk.AuditEntry{
 		Action:     sdk.AuditCreate,
 		Resource:   "tenant",
 		ResourceID: tenant.ID.String(),
 	})
 
-	return &CreateTenantOutput{Tenant: tenant, AdminRole: adminRole}, nil
+	return &CreateTenantOutput{Tenant: tenant}, nil
 }
 
 func (c *iamClient) UpdateTenant(ctx context.Context, tenantID uuid.UUID, in UpdateTenantInput) (*Tenant, error) {

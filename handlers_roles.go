@@ -1,9 +1,9 @@
 package iam
 
 import (
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 )
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -258,10 +258,8 @@ func (m *Module) handleGetMemberRoles(c *gin.Context) {
 	sdk.OK(c, roles)
 }
 
-// handleListPermissions returns the catalog of all available permissions.
-// TODO: Once the SDK exposes ctx.ListPermissions() for cross-module catalogs,
-// use that instead of only returning the IAM module's own permissions.
+// handleListPermissions returns the catalog of all available permissions
+// across all registered modules.
 func (m *Module) handleListPermissions(c *gin.Context) {
-	manifest := m.Manifest()
-	sdk.OK(c, manifest.Permissions)
+	sdk.OK(c, m.ctx.AllPermissions())
 }

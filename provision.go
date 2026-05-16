@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 )
 
 // RegisterHooks subscribes to kernel lifecycle hooks.
 //
 // Subscriptions:
-//   - after.kernel.tenant.provisioned → seed system roles + initial admin membership
+//   - after.kernel.tenant.provisioned → assign admin role to the provisioning user
 //   - before.kernel.tenant.deleted    → guard: prevent platform tenant deletion
 //
 // Emitted hook points (fired by IAM service layer):
@@ -26,6 +26,10 @@ func (m *Module) RegisterHooks(hooks *sdk.HookRegistry) {
 	// React to kernel provisioning a new tenant (org).
 	// This happens when `kernel tenant provision <id>` is run from the CLI
 	// or when the kernel provisions a tenant programmatically.
+	//
+	// System roles are global (tenant_id = NULL) so no per-tenant role
+	// seeding is needed. We only need to assign the admin role to the
+	// provisioning user.
 	hooks.After("after.kernel.tenant.provisioned", m.onTenantProvisioned)
 
 	// Guard tenant deletion at the kernel level.
@@ -40,12 +44,8 @@ type tenantProvisionedPayload struct {
 	UserID   uuid.UUID `json:"user_id"` // the user who triggered provisioning (optional)
 }
 
-// onTenantProvisioned seeds system roles and creates the initial admin
-// membership when the kernel provisions a new tenant.
-//
-// This is the hook-based equivalent of OnboardService.seedAndAssignAdmin.
-// It handles the CLI provisioning path; the onboarding path calls the
-// service directly.
+// onTenantProvisioned assigns the global admin role to the provisioning user.
+// System roles are global and always exist — no per-tenant seeding needed.
 func (m *Module) onTenantProvisioned(ctx context.Context, payload any) error {
 	// The kernel passes the payload as a struct or map. Marshal to JSON
 	// so we can unmarshal into our typed struct.
@@ -63,19 +63,18 @@ func (m *Module) onTenantProvisioned(ctx context.Context, payload any) error {
 		return fmt.Errorf("iam: tenant.provisioned hook: missing tenant_id")
 	}
 
-	m.ctx.Logger.Info("seeding system roles for provisioned tenant",
+	m.ctx.Logger.Info("processing tenant provisioned hook",
 		"tenant_id", p.TenantID,
 	)
 
-	// Seed the 3 default system roles (admin, manager, member).
-	adminRole, err := m.seedSystemRoles(ctx, p.TenantID)
-	if err != nil {
-		return err
-	}
-
 	// If a provisioning user was specified, create their membership and
-	// assign the admin role.
+	// assign the global admin role.
 	if p.UserID != uuid.Nil {
+		adminRole, err := m.repo.FindSystemRoleBySlug(ctx, "admin")
+		if err != nil {
+			return fmt.Errorf("iam: find global admin role: %w", err)
+		}
+
 		if err := m.provisionInitialMember(ctx, p.TenantID, p.UserID, adminRole.ID); err != nil {
 			return err
 		}
@@ -117,85 +116,54 @@ func (m *Module) guardTenantDeletion(ctx context.Context, payload any) error {
 	return nil
 }
 
-// ── Provisioning helpers ──────────────────────────────────────────────────────
+// ── System role reconciliation ────────────────────────────────────────────────
 
-// systemRoleDef describes a default system role seeded for every new tenant.
-type systemRoleDef struct {
-	Name        string
-	Slug        string
-	Description string
-	Permissions []string
-}
-
-// defaultSystemRoles returns the canonical set of system role definitions.
-// Both seedSystemRoles (hook/CLI path) and seedSystemRolesInTx (self-service
-// org creation) consume this so the permission sets never drift.
-func defaultSystemRoles() []systemRoleDef {
-	return []systemRoleDef{
-		{
-			Name:        "Admin",
-			Slug:        "admin",
-			Description: "Full access to all resources",
-			Permissions: []string{"*"},
-		},
-		{
-			Name:        "Manager",
-			Slug:        "manager",
-			Description: "Manage members and view all resources",
-			Permissions: []string{PermWrite},
-		},
-		{
-			Name:        "Member",
-			Slug:        "member",
-			Description: "Basic access to tenant resources",
-			Permissions: []string{PermRead},
-		},
-	}
-}
-
-// seedSystemRoles creates the default system roles for a tenant.
-// Returns the admin role for subsequent assignment.
+// reconcileSystemRoles ensures the 3 global system roles have the correct
+// permissions based on all registered module manifests. This runs once at
+// boot in Init() and touches exactly 3 role rows regardless of tenant count.
 //
-// This is extracted from OnboardService so both onboarding and
-// kernel-provisioning hooks can use the same logic.
-func (m *Module) seedSystemRoles(ctx context.Context, tenantID uuid.UUID) (*Role, error) {
-	var adminRole *Role
+// The reconciliation:
+//   - Admin always gets "*" (wildcard).
+//   - Manager and member get permissions where DefaultRoles includes their slug.
+//   - Stale permissions (from removed modules) are pruned.
+func (m *Module) reconcileSystemRoles(ctx context.Context) error {
+	allPerms := m.ctx.AllPermissions()
 
-	for _, def := range defaultSystemRoles() {
-		desc := def.Description
-		role := &Role{
-			TenantID:    tenantID,
-			Name:        def.Name,
-			Slug:        def.Slug,
-			Description: &desc,
-			IsSystem:    true,
-		}
-		if err := m.repo.CreateRole(ctx, role); err != nil {
-			// Skip if already seeded (idempotent).
-			if isDuplicateError(err) {
-				existing, findErr := m.repo.FindRoleBySlugAndTenant(ctx, def.Slug, tenantID)
-				if findErr != nil {
-					return nil, fmt.Errorf("iam: find existing system role %s: %w", def.Slug, findErr)
-				}
-				if def.Slug == "admin" {
-					adminRole = existing
-				}
-				continue
+	// Build the desired permission set for each system role.
+	desired := map[string][]string{
+		"admin":   {"*"},
+		"manager": {},
+		"member":  {},
+	}
+	for _, p := range allPerms {
+		for _, roleName := range p.DefaultRoles {
+			if _, ok := desired[roleName]; ok {
+				desired[roleName] = append(desired[roleName], p.Key)
 			}
-			return nil, fmt.Errorf("iam: seed system role %s: %w", def.Slug, err)
-		}
-
-		if err := m.repo.SetRolePermissions(ctx, role.ID, def.Permissions); err != nil {
-			return nil, fmt.Errorf("iam: seed permissions for role %s: %w", def.Slug, err)
-		}
-
-		if def.Slug == "admin" {
-			adminRole = role
 		}
 	}
 
-	return adminRole, nil
+	// Sync each system role's permissions to match the desired state.
+	for slug, perms := range desired {
+		role, err := m.repo.FindSystemRoleBySlug(ctx, slug)
+		if err != nil {
+			return fmt.Errorf("iam: reconcile system roles: find %s: %w", slug, err)
+		}
+
+		if err := m.repo.SetRolePermissions(ctx, role.ID, perms); err != nil {
+			return fmt.Errorf("iam: reconcile system roles: sync %s permissions: %w", slug, err)
+		}
+
+		m.ctx.Logger.Info("reconciled system role permissions",
+			"role", slug,
+			"permission_count", len(perms),
+		)
+	}
+
+	return nil
 }
+
+// ── Provisioning helpers ──────────────────────────────────────────────────────
 
 // provisionInitialMember creates a membership for the provisioning user
 // and assigns them the admin role.

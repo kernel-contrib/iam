@@ -6,32 +6,27 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
+	"github.com/kernel-contrib/sdk"
 	"gorm.io/gorm"
 )
-
-// ProvisionFn seeds system roles for a new tenant and returns the admin role.
-// Injected into RegistrationService so both onboarding and kernel-provisioning
-// hooks share the same logic (defined in provision.go).
-type ProvisionFn func(ctx context.Context, tenantID uuid.UUID) (*Role, error)
 
 // RegistrationService orchestrates self-service registration flows:
 //   - Register: find-or-create a user from an authenticated IdP identity.
 //   - CreateOrganization: create a new org and assign the founder as admin.
 //   - AcceptInvitation: accept a pending invitation and join a tenant.
 type RegistrationService struct {
-	users     *UserService
-	tenants   *TenantService
-	members   *MemberService
-	roles     *RoleService
-	invites   *InvitationService
-	provision ProvisionFn
-	db        *gorm.DB
-	bus       sdk.EventBus
-	redis     sdk.NamespacedRedis
-	log       *slog.Logger
+	users   *UserService
+	tenants *TenantService
+	members *MemberService
+	roles   *RoleService
+	invites *InvitationService
+	repo    *Repository
+	db      *gorm.DB
+	bus     sdk.EventBus
+	redis   sdk.NamespacedRedis
+	log     *slog.Logger
 }
 
 // NewRegistrationService constructs a RegistrationService.
@@ -41,23 +36,23 @@ func NewRegistrationService(
 	members *MemberService,
 	roles *RoleService,
 	invites *InvitationService,
-	provision ProvisionFn,
+	repo *Repository,
 	db *gorm.DB,
 	bus sdk.EventBus,
 	redis sdk.NamespacedRedis,
 	log *slog.Logger,
 ) *RegistrationService {
 	return &RegistrationService{
-		users:     users,
-		tenants:   tenants,
-		members:   members,
-		roles:     roles,
-		invites:   invites,
-		provision: provision,
-		db:        db,
-		bus:       bus,
-		redis:     redis,
-		log:       log,
+		users:   users,
+		tenants: tenants,
+		members: members,
+		roles:   roles,
+		invites: invites,
+		repo:    repo,
+		db:      db,
+		bus:     bus,
+		redis:   redis,
+		log:     log,
 	}
 }
 
@@ -194,6 +189,12 @@ func (s *RegistrationService) CreateOrganization(ctx context.Context, in CreateO
 
 	var output CreateOrgOutput
 
+	// Look up the global admin role before the transaction (it's immutable).
+	adminRole, err := s.repo.FindSystemRoleBySlug(ctx, "admin")
+	if err != nil {
+		return nil, fmt.Errorf("iam: find global admin role: %w", err)
+	}
+
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txRepo := NewRepository(tx)
 
@@ -236,13 +237,7 @@ func (s *RegistrationService) CreateOrganization(ctx context.Context, in CreateO
 			return fmt.Errorf("iam: create founder membership: %w", err)
 		}
 
-		// 3. Seed system roles (admin, manager, member).
-		adminRole, err := seedSystemRolesInTx(ctx, txRepo, org.ID)
-		if err != nil {
-			return err
-		}
-
-		// 4. Assign the admin role to the founding member.
+		// 3. Assign the global admin role to the founding member.
 		mr := MemberRole{MemberID: member.ID, RoleID: adminRole.ID}
 		if err := tx.Create(&mr).Error; err != nil {
 			return fmt.Errorf("iam: assign admin role: %w", err)
@@ -382,44 +377,4 @@ func (s *RegistrationService) invalidateMember(ctx context.Context, userID, tena
 	}
 	_ = sdk.Invalidate(ctx, s.redis, "member:"+userID.String()+":"+tenantID.String())
 	_ = sdk.Invalidate(ctx, s.redis, "perms:"+userID.String()+":"+tenantID.String())
-}
-
-// seedSystemRolesInTx creates the default system roles within a transaction.
-// Returns the admin role for subsequent assignment.
-func seedSystemRolesInTx(ctx context.Context, repo *Repository, tenantID uuid.UUID) (*Role, error) {
-	var adminRole *Role
-
-	for _, def := range defaultSystemRoles() {
-		desc := def.Description
-		role := &Role{
-			TenantID:    tenantID,
-			Name:        def.Name,
-			Slug:        def.Slug,
-			Description: &desc,
-			IsSystem:    true,
-		}
-		if err := repo.CreateRole(ctx, role); err != nil {
-			if isDuplicateError(err) {
-				existing, findErr := repo.FindRoleBySlugAndTenant(ctx, def.Slug, tenantID)
-				if findErr != nil {
-					return nil, fmt.Errorf("iam: find existing system role %s: %w", def.Slug, findErr)
-				}
-				if def.Slug == "admin" {
-					adminRole = existing
-				}
-				continue
-			}
-			return nil, fmt.Errorf("iam: seed system role %s: %w", def.Slug, err)
-		}
-
-		if err := repo.SetRolePermissions(ctx, role.ID, def.Permissions); err != nil {
-			return nil, fmt.Errorf("iam: seed permissions for role %s: %w", def.Slug, err)
-		}
-
-		if def.Slug == "admin" {
-			adminRole = role
-		}
-	}
-
-	return adminRole, nil
 }

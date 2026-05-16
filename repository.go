@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
+	"github.com/kernel-contrib/sdk"
 	"gorm.io/gorm"
 )
 
@@ -361,7 +361,7 @@ func (r *Repository) FindRoleByID(ctx context.Context, id uuid.UUID) (*Role, err
 func (r *Repository) FindRolesByTenant(ctx context.Context, tenantID uuid.UUID) ([]Role, error) {
 	var roles []Role
 	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
+		Where("tenant_id = ? OR (tenant_id IS NULL AND is_system = true)", tenantID).
 		Preload("Permissions").
 		Find(&roles).Error; err != nil {
 		return nil, fmt.Errorf("iam: find roles by tenant: %w", err)
@@ -369,10 +369,10 @@ func (r *Repository) FindRolesByTenant(ctx context.Context, tenantID uuid.UUID) 
 	return roles, nil
 }
 
-func (r *Repository) FindSystemRoles(ctx context.Context, tenantID uuid.UUID) ([]Role, error) {
+func (r *Repository) FindSystemRoles(ctx context.Context) ([]Role, error) {
 	var roles []Role
 	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND is_system = ?", tenantID, true).
+		Where("tenant_id IS NULL AND is_system = true").
 		Preload("Permissions").
 		Find(&roles).Error; err != nil {
 		return nil, fmt.Errorf("iam: find system roles: %w", err)
@@ -380,8 +380,20 @@ func (r *Repository) FindSystemRoles(ctx context.Context, tenantID uuid.UUID) ([
 	return roles, nil
 }
 
-// FindRoleBySlugAndTenant looks up a role by its slug within a specific tenant.
-// Used during idempotent provisioning to find pre-existing system roles.
+// FindSystemRoleBySlug returns a global system role by slug.
+// System roles have tenant_id = NULL and is_system = true.
+func (r *Repository) FindSystemRoleBySlug(ctx context.Context, slug string) (*Role, error) {
+	var role Role
+	if err := r.db.WithContext(ctx).
+		Where("slug = ? AND tenant_id IS NULL AND is_system = true", slug).
+		Preload("Permissions").
+		First(&role).Error; err != nil {
+		return nil, fmt.Errorf("iam: find system role by slug: %w", err)
+	}
+	return &role, nil
+}
+
+// FindRoleBySlugAndTenant looks up a custom (tenant-scoped) role by its slug.
 func (r *Repository) FindRoleBySlugAndTenant(ctx context.Context, slug string, tenantID uuid.UUID) (*Role, error) {
 	var role Role
 	if err := r.db.WithContext(ctx).

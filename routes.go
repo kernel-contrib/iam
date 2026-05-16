@@ -1,6 +1,6 @@
 package iam
 
-import "github.com/edgescaleDev/kernel/sdk"
+import "github.com/kernel-contrib/sdk"
 
 // RouteHandlers mounts all HTTP endpoints on the kernel router.
 // Routes are split into two groups:
