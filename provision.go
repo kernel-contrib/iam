@@ -141,18 +141,13 @@ func (m *Module) seedSystemRoles(ctx context.Context, tenantID uuid.UUID) (*Role
 			Name:        "Manager",
 			Slug:        "manager",
 			Description: "Manage members and view all resources",
-			Permissions: []string{
-				"iam.tenants.read", "iam.members.read", "iam.members.manage",
-				"iam.roles.read", "iam.invitations.read", "iam.invitations.manage",
-			},
+			Permissions: []string{PermWrite},
 		},
 		{
 			Name:        "Member",
 			Slug:        "member",
 			Description: "Basic access to tenant resources",
-			Permissions: []string{
-				"iam.tenants.read", "iam.members.read",
-			},
+			Permissions: []string{PermRead},
 		},
 	}
 

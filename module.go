@@ -31,6 +31,7 @@ type Module struct {
 	roles        *RoleService
 	invitations  *InvitationService
 	registration *RegistrationService
+	client       *iamClient
 }
 
 // New constructs the IAM module.
@@ -49,20 +50,19 @@ func (m *Module) Manifest() sdk.Manifest {
 		Version:     "1.0.0",
 
 		Permissions: []sdk.Permission{
-			// Tenants
-			{Key: "iam.tenants.read", Label: sdk.T("View tenant details", "ar", "عرض تفاصيل المستأجر")},
-			{Key: "iam.tenants.manage", Label: sdk.T("Create, update, and delete tenants", "ar", "إنشاء وتعديل وحذف المستأجرين")},
-			// Members
-			{Key: "iam.members.read", Label: sdk.T("View members", "ar", "عرض الأعضاء")},
-			{Key: "iam.members.manage", Label: sdk.T("Add, update, and remove members", "ar", "إضافة وتعديل وإزالة الأعضاء")},
-			// Roles
-			{Key: "iam.roles.read", Label: sdk.T("View roles", "ar", "عرض الأدوار")},
-			{Key: "iam.roles.manage", Label: sdk.T("Create, update, and delete roles", "ar", "إنشاء وتعديل وحذف الأدوار")},
-			// Invitations
-			{Key: "iam.invitations.read", Label: sdk.T("View invitations", "ar", "عرض الدعوات")},
-			{Key: "iam.invitations.manage", Label: sdk.T("Create and revoke invitations", "ar", "إنشاء وإلغاء الدعوات")},
-			// Permissions catalog
-			{Key: "iam.permissions.read", Label: sdk.T("View permissions catalog", "ar", "عرض كتالوج الصلاحيات")},
+			// Simplified keys (preferred for new code).
+			{Key: PermRead, Label: sdk.T("View IAM resources", "ar", "عرض موارد الهوية")},
+			{Key: PermWrite, Label: sdk.T("Manage IAM resources", "ar", "إدارة موارد الهوية")},
+			// Legacy keys (kept for 3-5 releases).
+			{Key: PermTenantsRead, Label: sdk.T("View tenant details", "ar", "عرض تفاصيل المستأجر")},
+			{Key: PermTenantsManage, Label: sdk.T("Create, update, and delete tenants", "ar", "إنشاء وتعديل وحذف المستأجرين")},
+			{Key: PermMembersRead, Label: sdk.T("View members", "ar", "عرض الأعضاء")},
+			{Key: PermMembersManage, Label: sdk.T("Add, update, and remove members", "ar", "إضافة وتعديل وإزالة الأعضاء")},
+			{Key: PermRolesRead, Label: sdk.T("View roles", "ar", "عرض الأدوار")},
+			{Key: PermRolesManage, Label: sdk.T("Create, update, and delete roles", "ar", "إنشاء وتعديل وحذف الأدوار")},
+			{Key: PermInvitationsRead, Label: sdk.T("View invitations", "ar", "عرض الدعوات")},
+			{Key: PermInvitationsManage, Label: sdk.T("Create and revoke invitations", "ar", "إنشاء وإلغاء الدعوات")},
+			{Key: PermPermissionsRead, Label: sdk.T("View permissions catalog", "ar", "عرض كتالوج الصلاحيات")},
 		},
 
 		PublicEvents: []sdk.EventDef{
@@ -109,9 +109,9 @@ func (m *Module) Manifest() sdk.Manifest {
 		},
 
 		UINav: []sdk.NavItem{
-			{Label: sdk.T("Members", "ar", "الأعضاء"), Icon: "users", Path: "/iam/members", Permission: "iam.members.read", SortOrder: 1},
-			{Label: sdk.T("Roles", "ar", "الأدوار"), Icon: "shield", Path: "/iam/roles", Permission: "iam.roles.read", SortOrder: 2},
-			{Label: sdk.T("Invitations", "ar", "الدعوات"), Icon: "mail", Path: "/iam/invitations", Permission: "iam.invitations.read", SortOrder: 3},
+			{Label: sdk.T("Members", "ar", "الأعضاء"), Icon: "users", Path: "/iam/members", Permission: PermRead, SortOrder: 1},
+			{Label: sdk.T("Roles", "ar", "الأدوار"), Icon: "shield", Path: "/iam/roles", Permission: PermRead, SortOrder: 2},
+			{Label: sdk.T("Invitations", "ar", "الدعوات"), Icon: "mail", Path: "/iam/invitations", Permission: PermRead, SortOrder: 3},
 		},
 	}
 }
@@ -138,7 +138,7 @@ func (m *Module) Init(ctx sdk.Context) error {
 		ctx.DB, ctx.Bus, ctx.Redis, ctx.Logger,
 	)
 
-	// Register the reader for cross-module consumption.
+	// Register the reader for cross-module consumption (legacy).
 	// Other modules resolve reads via: sdk.Reader[iam.IAMReader](&m.ctx, "iam")
 	// Other modules resolve writes via: sdk.Reader[iam.IAMRegistrar](&m.ctx, "iam")
 	ctx.RegisterReader(&iamReader{
@@ -147,6 +147,23 @@ func (m *Module) Init(ctx sdk.Context) error {
 		roles:        m.roles,
 		redis:        ctx.Redis,
 	})
+
+	// Register the unified client for new cross-module consumers.
+	// Resolved via: sdk.Client[iam.IAMClient](&m.ctx, "iam")
+	m.client = &iamClient{
+		users:        m.users,
+		tenants:      m.tenants,
+		members:      m.members,
+		roles:        m.roles,
+		invitations:  m.invitations,
+		registration: m.registration,
+		repo:         m.repo,
+		redis:        ctx.Redis,
+		audit:        ctx.Audit,
+		db:           ctx.DB,
+		seedRoles:    m.seedSystemRoles,
+	}
+	ctx.RegisterClient(m.client)
 
 	ctx.Logger.Info("iam module initialized")
 	return nil

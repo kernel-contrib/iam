@@ -6,9 +6,6 @@ import "github.com/edgescaleDev/kernel/sdk"
 // Routes are split into two groups:
 //   - Global: authenticated self-service (/v1/iam/...)
 //   - Tenant-scoped: require tenant context (/v1/:tenant_id/iam/...)
-//
-// NOTE: Once the kernel is updated with URL-based tenant routing (Phase 0),
-// tenant-scoped routes will use `router.Tenant()` instead of the full path.
 func (m *Module) RouteHandlers() []sdk.RouteHandler {
 	return []sdk.RouteHandler{
 		{
@@ -20,7 +17,7 @@ func (m *Module) RouteHandlers() []sdk.RouteHandler {
 func (m *Module) registerClientRoutes(router *sdk.Router) {
 	// ── Global routes (self-service, no tenant context) ───────────────────
 	// Permissions catalog (all module permissions).
-	router.GET("/permissions", "iam.permissions.read", m.handleListPermissions)
+	router.GET("/permissions", PermRead, m.handleListPermissions)
 
 	// Self-service registration. Uses sdk.Self because the IAM user record
 	// may not exist yet -- the kernel only needs a valid IdP token.
@@ -49,48 +46,48 @@ func (m *Module) registerClientRoutes(router *sdk.Router) {
 	t.GET("/me/roles", sdk.Self, m.handleGetMyRoles)
 
 	// Current tenant.
-	t.GET("/tenant", "iam.tenants.read", m.handleGetTenant)
-	t.PATCH("/tenant", "iam.tenants.manage", m.handleUpdateTenant)
-	t.DELETE("/tenant", "iam.tenants.manage", m.handleDeleteTenant)
+	t.GET("/tenant", PermReader, m.handleGetTenant)
+	t.PATCH("/tenant", PermWriter, m.handleUpdateTenant)
+	t.DELETE("/tenant", PermWriter, m.handleDeleteTenant)
 
 	// Branches (child tenants).
-	t.GET("/branches", "iam.tenants.read", m.handleListChildren)
-	t.POST("/branches", "iam.tenants.manage", m.handleCreateBranch)
-	t.GET("/branches/:id", "iam.tenants.read", m.handleGetBranch)
-	t.PATCH("/branches/:id", "iam.tenants.manage", m.handleUpdateBranch)
-	t.DELETE("/branches/:id", "iam.tenants.manage", m.handleDeleteBranch)
+	t.GET("/branches", PermReader, m.handleListChildren)
+	t.POST("/branches", PermWriter, m.handleCreateBranch)
+	t.GET("/branches/:id", PermReader, m.handleGetBranch)
+	t.PATCH("/branches/:id", PermWriter, m.handleUpdateBranch)
+	t.DELETE("/branches/:id", PermWriter, m.handleDeleteBranch)
 
 	// Members.
-	t.GET("/members", "iam.members.read", m.handleListMembers)
-	t.POST("/members", "iam.members.manage", m.handleAddMember)
-	t.GET("/members/:id", "iam.members.read", m.handleGetMember)
-	t.PATCH("/members/:id", "iam.members.manage", m.handleUpdateMember)
-	t.DELETE("/members/:id", "iam.members.manage", m.handleRemoveMember)
+	t.GET("/members", PermReader, m.handleListMembers)
+	t.POST("/members", PermWriter, m.handleAddMember)
+	t.GET("/members/:id", PermReader, m.handleGetMember)
+	t.PATCH("/members/:id", PermWriter, m.handleUpdateMember)
+	t.DELETE("/members/:id", PermWriter, m.handleRemoveMember)
 
 	// Member role assignments.
-	t.GET("/members/:id/roles", "iam.roles.read", m.handleGetMemberRoles)
-	t.POST("/members/:id/roles", "iam.roles.manage", m.handleAssignRole)
-	t.DELETE("/members/:id/roles/:role_id", "iam.roles.manage", m.handleRevokeRole)
+	t.GET("/members/:id/roles", PermReader, m.handleGetMemberRoles)
+	t.POST("/members/:id/roles", PermWriter, m.handleAssignRole)
+	t.DELETE("/members/:id/roles/:role_id", PermWriter, m.handleRevokeRole)
 
 	// Roles.
-	t.GET("/roles", "iam.roles.read", m.handleListRoles)
-	t.POST("/roles", "iam.roles.manage", m.handleCreateRole)
-	t.GET("/roles/:id", "iam.roles.read", m.handleGetRole)
-	t.PATCH("/roles/:id", "iam.roles.manage", m.handleUpdateRole)
-	t.DELETE("/roles/:id", "iam.roles.manage", m.handleDeleteRole)
+	t.GET("/roles", PermReader, m.handleListRoles)
+	t.POST("/roles", PermWriter, m.handleCreateRole)
+	t.GET("/roles/:id", PermReader, m.handleGetRole)
+	t.PATCH("/roles/:id", PermWriter, m.handleUpdateRole)
+	t.DELETE("/roles/:id", PermWriter, m.handleDeleteRole)
 
 	// Role permissions.
-	t.GET("/roles/:id/permissions", "iam.roles.read", m.handleGetRolePermissions)
-	t.PUT("/roles/:id/permissions", "iam.roles.manage", m.handleSetRolePermissions)
+	t.GET("/roles/:id/permissions", PermReader, m.handleGetRolePermissions)
+	t.PUT("/roles/:id/permissions", PermWriter, m.handleSetRolePermissions)
 
 	// Invitations.
-	t.GET("/invitations", "iam.invitations.read", m.handleListInvitations)
-	t.POST("/invitations", "iam.invitations.manage", m.handleCreateInvitation)
-	t.GET("/invitations/:id", "iam.invitations.read", m.handleGetInvitation)
-	t.DELETE("/invitations/:id", "iam.invitations.manage", m.handleRevokeInvitation)
+	t.GET("/invitations", PermReader, m.handleListInvitations)
+	t.POST("/invitations", PermWriter, m.handleCreateInvitation)
+	t.GET("/invitations/:id", PermReader, m.handleGetInvitation)
+	t.DELETE("/invitations/:id", PermWriter, m.handleRevokeInvitation)
 
 	// Auth providers (per-tenant IdP configuration).
-	t.GET("/auth-providers", "iam.tenants.manage", m.handleListAuthProviders)
-	t.PUT("/auth-providers", "iam.tenants.manage", m.handleSetAuthProviders)
+	t.GET("/auth-providers", PermReader, m.handleListAuthProviders)
+	t.PUT("/auth-providers", PermWriter, m.handleSetAuthProviders)
 
 }

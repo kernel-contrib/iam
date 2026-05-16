@@ -117,6 +117,14 @@ func (r *Repository) FindTenantChildren(ctx context.Context, parentID uuid.UUID)
 	return children, nil
 }
 
+// ListTenantChildren returns a paginated list of direct child tenants.
+func (r *Repository) ListTenantChildren(ctx context.Context, parentID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[Tenant], error) {
+	return sdk.Paginate[Tenant](
+		r.db.WithContext(ctx).Model(&Tenant{}).Where("parent_id = ?", parentID),
+		page,
+	)
+}
+
 // FindTenantAncestors returns all ancestors of a tenant by querying the
 // materialized path. The path column stores slash-separated UUIDs from
 // root to the current tenant, e.g. "/{platform_id}/{org_id}/{branch_id}".
