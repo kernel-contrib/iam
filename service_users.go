@@ -221,7 +221,7 @@ func (s *UserService) Erase(ctx context.Context, id uuid.UUID) error {
 // TouchLastLogin updates the last_login_at timestamp.
 func (s *UserService) TouchLastLogin(ctx context.Context, id uuid.UUID) error {
 	_, err := s.repo.UpdateUser(ctx, id, map[string]any{
-		"last_login_at": "NOW()",
+		"last_login_at": gorm.Expr("NOW()"),
 	})
 	return err
 }

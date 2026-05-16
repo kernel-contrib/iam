@@ -141,6 +141,11 @@ func (m *Module) handleGetBranch(c *gin.Context) {
 		return
 	}
 
+	if branch.ParentID == nil || *branch.ParentID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("branch", id))
+		return
+	}
+
 	sdk.OK(c, branch)
 }
 
@@ -148,6 +153,17 @@ func (m *Module) handleGetBranch(c *gin.Context) {
 func (m *Module) handleUpdateBranch(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
+		return
+	}
+
+	// Verify this branch belongs to the current tenant.
+	existing, err := m.tenants.GetByID(c.Request.Context(), id)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+	if existing.ParentID == nil || *existing.ParentID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("branch", id))
 		return
 	}
 
@@ -178,6 +194,17 @@ func (m *Module) handleUpdateBranch(c *gin.Context) {
 func (m *Module) handleDeleteBranch(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
+		return
+	}
+
+	// Verify this branch belongs to the current tenant.
+	existing, err := m.tenants.GetByID(c.Request.Context(), id)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+	if existing.ParentID == nil || *existing.ParentID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("branch", id))
 		return
 	}
 

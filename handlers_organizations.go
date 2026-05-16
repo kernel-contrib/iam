@@ -5,6 +5,7 @@ import (
 
 	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ type createOrganizationRequest struct {
 // single database transaction. If any step fails, nothing is committed.
 func (m *Module) handleCreateOrganization(c *gin.Context) {
 	uid := userID(c)
-	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+	if uid == uuid.Nil {
 		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
 		return
 	}

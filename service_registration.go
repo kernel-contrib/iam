@@ -387,40 +387,9 @@ func (s *RegistrationService) invalidateMember(ctx context.Context, userID, tena
 // seedSystemRolesInTx creates the default system roles within a transaction.
 // Returns the admin role for subsequent assignment.
 func seedSystemRolesInTx(ctx context.Context, repo *Repository, tenantID uuid.UUID) (*Role, error) {
-	defs := []struct {
-		Name        string
-		Slug        string
-		Description string
-		Permissions []string
-	}{
-		{
-			Name:        "Admin",
-			Slug:        "admin",
-			Description: "Full access to all resources",
-			Permissions: []string{"*"},
-		},
-		{
-			Name:        "Manager",
-			Slug:        "manager",
-			Description: "Manage members and view all resources",
-			Permissions: []string{
-				"iam.tenants.read", "iam.members.read", "iam.members.manage",
-				"iam.roles.read", "iam.invitations.read", "iam.invitations.manage",
-			},
-		},
-		{
-			Name:        "Member",
-			Slug:        "member",
-			Description: "Basic access to tenant resources",
-			Permissions: []string{
-				"iam.tenants.read", "iam.members.read",
-			},
-		},
-	}
-
 	var adminRole *Role
 
-	for _, def := range defs {
+	for _, def := range defaultSystemRoles() {
 		desc := def.Description
 		role := &Role{
 			TenantID:    tenantID,

@@ -115,7 +115,7 @@ type invitationTokenRequest struct {
 // (tenant name, role, inviter) so the frontend can show a confirmation screen.
 func (m *Module) handlePreviewInvitation(c *gin.Context) {
 	uid := userID(c)
-	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+	if uid == uuid.Nil {
 		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
 		return
 	}
@@ -144,7 +144,7 @@ func (m *Module) handlePreviewInvitation(c *gin.Context) {
 // the tenant and role -- the client only needs to supply the token.
 func (m *Module) handleAcceptInvitation(c *gin.Context) {
 	uid := userID(c)
-	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+	if uid == uuid.Nil {
 		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
 		return
 	}

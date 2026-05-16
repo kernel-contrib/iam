@@ -119,18 +119,19 @@ func (m *Module) guardTenantDeletion(ctx context.Context, payload any) error {
 
 // ── Provisioning helpers ──────────────────────────────────────────────────────
 
-// seedSystemRoles creates the default system roles for a tenant.
-// Returns the admin role for subsequent assignment.
-//
-// This is extracted from OnboardService so both onboarding and
-// kernel-provisioning hooks can use the same logic.
-func (m *Module) seedSystemRoles(ctx context.Context, tenantID uuid.UUID) (*Role, error) {
-	definitions := []struct {
-		Name        string
-		Slug        string
-		Description string
-		Permissions []string
-	}{
+// systemRoleDef describes a default system role seeded for every new tenant.
+type systemRoleDef struct {
+	Name        string
+	Slug        string
+	Description string
+	Permissions []string
+}
+
+// defaultSystemRoles returns the canonical set of system role definitions.
+// Both seedSystemRoles (hook/CLI path) and seedSystemRolesInTx (self-service
+// org creation) consume this so the permission sets never drift.
+func defaultSystemRoles() []systemRoleDef {
+	return []systemRoleDef{
 		{
 			Name:        "Admin",
 			Slug:        "admin",
@@ -150,10 +151,17 @@ func (m *Module) seedSystemRoles(ctx context.Context, tenantID uuid.UUID) (*Role
 			Permissions: []string{PermRead},
 		},
 	}
+}
 
+// seedSystemRoles creates the default system roles for a tenant.
+// Returns the admin role for subsequent assignment.
+//
+// This is extracted from OnboardService so both onboarding and
+// kernel-provisioning hooks can use the same logic.
+func (m *Module) seedSystemRoles(ctx context.Context, tenantID uuid.UUID) (*Role, error) {
 	var adminRole *Role
 
-	for _, def := range definitions {
+	for _, def := range defaultSystemRoles() {
 		desc := def.Description
 		role := &Role{
 			TenantID:    tenantID,

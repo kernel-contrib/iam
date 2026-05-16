@@ -2,7 +2,7 @@ package iam
 
 import "github.com/edgescaleDev/kernel/sdk"
 
-// ── Simplified permission keys (preferred for new code) ───────────────────────
+// Simplified permission keys (preferred for new code)
 //
 // Each module exposes exactly two permissions: read and write.
 // "Write implies read" is handled by the PermReader grouping below,
@@ -29,10 +29,9 @@ var PermWriter = sdk.RequireAny(PermWrite,
 	PermMembersManage,
 	PermRolesManage,
 	PermInvitationsManage,
-	PermPermissionsRead,
 )
 
-// ── Legacy permission keys (kept for 3-5 releases, then removed) ──────────────
+// Legacy permission keys (kept for 3-5 releases, then removed)
 //
 // Existing roles may reference these fine-grained keys. They remain
 // in the Manifest so the kernel considers them valid. New code should

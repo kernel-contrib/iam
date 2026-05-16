@@ -483,18 +483,18 @@ func (c *iamClient) RevokeRole(ctx context.Context, memberID, roleID uuid.UUID) 
 }
 
 func (c *iamClient) SetMemberRole(ctx context.Context, memberID, roleID uuid.UUID) error {
-	return c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Remove all existing roles.
-		if err := tx.Where("member_id = ?", memberID).Delete(&MemberRole{}).Error; err != nil {
-			return fmt.Errorf("iam: clear member roles: %w", err)
+	existing, err := c.roles.GetMemberRoles(ctx, memberID)
+	if err != nil {
+		return fmt.Errorf("iam: get member roles: %w", err)
+	}
+
+	for _, mr := range existing {
+		if err := c.roles.RevokeFromMember(ctx, memberID, mr.RoleID); err != nil {
+			return fmt.Errorf("iam: revoke member role: %w", err)
 		}
-		// Assign the new role.
-		mr := &MemberRole{MemberID: memberID, RoleID: roleID}
-		if err := tx.Create(mr).Error; err != nil {
-			return fmt.Errorf("iam: assign member role: %w", err)
-		}
-		return nil
-	})
+	}
+
+	return c.roles.AssignToMember(ctx, memberID, roleID)
 }
 
 // Permissions:
@@ -559,9 +559,10 @@ func (c *iamClient) RevokeInvitation(ctx context.Context, invitationID uuid.UUID
 		return err
 	}
 	c.audit.Log(ctx, sdk.AuditEntry{
-		Action:     sdk.AuditDelete,
+		Action:     sdk.AuditUpdate,
 		Resource:   "invitation",
 		ResourceID: invitationID.String(),
+		Changes:    map[string]sdk.AuditChange{"status": {Old: "pending", New: "revoked"}},
 	})
 	return nil
 }

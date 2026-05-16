@@ -244,7 +244,7 @@ func (m *Module) ResolveUser(ctx context.Context, provider, externalID string, t
 		return nil, nil
 	}
 
-	perms, err := m.roles.ResolvePermissions(ctx, user.ID, tenantID)
+	perms, err := m.client.ResolvePermissions(ctx, user.ID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -261,6 +261,9 @@ func (m *Module) ResolveUser(ctx context.Context, provider, externalID string, t
 func (m *Module) ResolveAdmin(ctx context.Context, provider, externalID string) (*sdk.ResolvedUser, error) {
 	user, err := m.repo.FindUserByProviderID(ctx, externalID, provider)
 	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
