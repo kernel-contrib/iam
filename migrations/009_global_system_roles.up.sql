@@ -1,6 +1,10 @@
 -- Make system roles global (tenant_id = NULL) instead of per-tenant copies.
 -- This reduces role seeding from O(tenants) to O(1) and ensures all tenants
 -- share the same system role definitions.
+--
+-- IMPORTANT: existing member_role assignments are preserved by snapshotting
+-- the member_id-to-slug mapping before deleting, then re-inserting after
+-- the new global roles are seeded.
 -- 1. Drop the old unique index that requires tenant_id.
 DROP INDEX IF EXISTS idx_roles_tenant_slug;
 -- 2. Allow tenant_id to be NULL (NULL = system/global role).
@@ -19,12 +23,20 @@ WHERE deleted_at IS NULL
 CREATE UNIQUE INDEX idx_roles_system_slug ON roles(slug)
 WHERE deleted_at IS NULL
     AND tenant_id IS NULL;
--- 7. Delete all existing per-tenant system roles (they will be recreated as global).
---    Member role assignments pointing to these roles are also cleaned up via CASCADE
---    on the member_roles.role_id foreign key, and role_permissions via CASCADE on role_id.
+-- 7. Snapshot existing system role assignments before deleting.
+--    This preserves which member had which system role (by slug) so we can
+--    re-map them to the new global roles after seeding.
+CREATE TEMP TABLE _system_role_assignments AS
+SELECT mr.member_id,
+    r.slug
+FROM member_roles mr
+    JOIN roles r ON r.id = mr.role_id
+WHERE r.is_system = TRUE;
+-- 8. Delete all existing per-tenant system roles.
+--    Cascades to member_roles and role_permissions for these roles.
 DELETE FROM roles
 WHERE is_system = TRUE;
--- 8. Seed the 3 global system roles.
+-- 9. Seed the 3 global system roles.
 INSERT INTO roles (
         id,
         tenant_id,
@@ -57,7 +69,7 @@ VALUES (
         'Standard team member access',
         TRUE
     );
--- 9. Seed the admin wildcard permission.
+-- 10. Seed the admin wildcard permission.
 INSERT INTO role_permissions (id, role_id, permission_key)
 SELECT gen_random_uuid(),
     id,
@@ -66,3 +78,17 @@ FROM roles
 WHERE slug = 'admin'
     AND tenant_id IS NULL
     AND is_system = TRUE;
+-- 11. Re-map saved assignments to the new global system roles.
+--     ON CONFLICT DO NOTHING handles the edge case where a member had the
+--     same system role slug via multiple per-tenant copies.
+INSERT INTO member_roles (id, member_id, role_id, created_at)
+SELECT gen_random_uuid(),
+    sra.member_id,
+    r.id,
+    NOW()
+FROM _system_role_assignments sra
+    JOIN roles r ON r.slug = sra.slug
+    AND r.tenant_id IS NULL
+    AND r.is_system = TRUE ON CONFLICT DO NOTHING;
+-- 12. Clean up temp table.
+DROP TABLE _system_role_assignments;
