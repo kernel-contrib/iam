@@ -348,6 +348,26 @@ func (r *Repository) FindMemberInAncestorChain(ctx context.Context, userID, tena
 	return &best, nil
 }
 
+// FindMembershipsByUserAndTenants returns all active memberships for the given
+// user across the specified tenant IDs in a single query. The result is keyed
+// by tenant ID for O(1) lookup. Used by ResolvePermissions to avoid N+1.
+func (r *Repository) FindMembershipsByUserAndTenants(ctx context.Context, userID uuid.UUID, tenantIDs []uuid.UUID) (map[uuid.UUID]*TenantMember, error) {
+	if len(tenantIDs) == 0 {
+		return map[uuid.UUID]*TenantMember{}, nil
+	}
+	var members []TenantMember
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND tenant_id IN ?", userID, tenantIDs).
+		Find(&members).Error; err != nil {
+		return nil, fmt.Errorf("iam: find memberships by user and tenants: %w", err)
+	}
+	result := make(map[uuid.UUID]*TenantMember, len(members))
+	for i := range members {
+		result[members[i].TenantID] = &members[i]
+	}
+	return result, nil
+}
+
 // ── Roles ─────────────────────────────────────────────────────────────────────
 
 func (r *Repository) FindRoleByID(ctx context.Context, id uuid.UUID) (*Role, error) {

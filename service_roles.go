@@ -287,16 +287,20 @@ func (s *RoleService) ResolvePermissions(ctx context.Context, userID, tenantID u
 		chainIDs = append(chainIDs, ancestorIDs[i])
 	}
 
-	// 3. Walk the chain collecting permissions.
+	// 3. Batch-fetch all memberships for the user across the ancestor chain
+	// in a single query, avoiding N+1 DB roundtrips per level.
+	membersByTenant, err := s.repo.FindMembershipsByUserAndTenants(ctx, userID, chainIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Walk the chain collecting permissions using the pre-fetched map.
 	permSet := make(map[string]bool)
 
 	for _, tid := range chainIDs {
-		member, err := s.repo.FindMemberByUserAndTenant(ctx, userID, tid)
-		if isNotFoundErr(err) {
+		member, ok := membersByTenant[tid]
+		if !ok {
 			continue // no membership at this level
-		}
-		if err != nil {
-			return nil, err
 		}
 
 		// Skip suspended members.

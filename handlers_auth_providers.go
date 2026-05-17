@@ -65,10 +65,12 @@ func (m *Module) handleSetAuthProviders(c *gin.Context) {
 		ResourceID: tid.String(),
 	})
 
-	m.ctx.Bus.Publish(c.Request.Context(), "iam.tenant.auth_config.updated", map[string]any{
-		"tenant_id": tid,
-		"providers": req.Providers,
-	})
+	if m.ctx.Bus != nil {
+		m.ctx.Bus.Publish(c.Request.Context(), "iam.tenant.auth_config.updated", map[string]any{
+			"tenant_id": tid,
+			"providers": req.Providers,
+		})
+	}
 
 	// Return the new state.
 	updated, err := m.repo.ListAuthConfig(c.Request.Context(), tid)

@@ -476,18 +476,20 @@ func (c *iamClient) RevokeRole(ctx context.Context, memberID, roleID uuid.UUID) 
 }
 
 func (c *iamClient) SetMemberRole(ctx context.Context, memberID, roleID uuid.UUID) error {
-	existing, err := c.roles.GetMemberRoles(ctx, memberID)
-	if err != nil {
-		return fmt.Errorf("iam: get member roles: %w", err)
-	}
-
-	for _, mr := range existing {
-		if err := c.roles.RevokeFromMember(ctx, memberID, mr.RoleID); err != nil {
-			return fmt.Errorf("iam: revoke member role: %w", err)
+	return c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, err := c.roles.GetMemberRoles(ctx, memberID)
+		if err != nil {
+			return fmt.Errorf("iam: get member roles: %w", err)
 		}
-	}
 
-	return c.roles.AssignToMember(ctx, memberID, roleID)
+		for _, mr := range existing {
+			if err := c.roles.RevokeFromMember(ctx, memberID, mr.RoleID); err != nil {
+				return fmt.Errorf("iam: revoke member role: %w", err)
+			}
+		}
+
+		return c.roles.AssignToMember(ctx, memberID, roleID)
+	})
 }
 
 // Permissions:
