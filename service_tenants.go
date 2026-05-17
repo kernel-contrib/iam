@@ -2,12 +2,14 @@ package iam
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
 	"github.com/kernel-contrib/sdk"
+	"gorm.io/gorm"
 )
 
 // TenantService provides business logic for tenant hierarchy operations.
@@ -179,8 +181,9 @@ func (s *TenantService) CreateBranch(ctx context.Context, in CreateBranchInput) 
 
 // UpdateTenantInput is a partial update for tenant fields.
 type UpdateTenantInput struct {
-	Name    *string
-	LogoURL *string
+	Name     *string
+	LogoURL  *string
+	Metadata json.RawMessage
 }
 
 // Update patches tenant fields and publishes iam.tenant.updated.
@@ -191,6 +194,9 @@ func (s *TenantService) Update(ctx context.Context, id uuid.UUID, in UpdateTenan
 	}
 	if in.LogoURL != nil {
 		updates["logo_url"] = *in.LogoURL
+	}
+	if len(in.Metadata) > 0 {
+		updates["metadata"] = gorm.Expr("COALESCE(metadata, '{}'::jsonb) || ?::jsonb", sdk.JSONB(in.Metadata))
 	}
 	if len(updates) == 0 {
 		return s.repo.FindTenantByID(ctx, id)

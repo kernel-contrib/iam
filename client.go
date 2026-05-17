@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -35,6 +36,7 @@ type IAMClient interface {
 	GetTenantAncestors(ctx context.Context, tenantID uuid.UUID) ([]Tenant, error)
 	GetOrgForTenant(ctx context.Context, tenantID uuid.UUID) (*Tenant, error)
 	CreateBranch(ctx context.Context, in CreateBranchInput) (*Tenant, error)
+	UpdateTenantMetadata(ctx context.Context, tenantID uuid.UUID, metadata json.RawMessage) (*Tenant, error)
 
 	// Members:
 	GetMember(ctx context.Context, memberID uuid.UUID) (*TenantMember, error)
@@ -294,6 +296,10 @@ func (c *iamClient) CreateBranch(ctx context.Context, in CreateBranchInput) (*Te
 		ResourceID: branch.ID.String(),
 	})
 	return branch, nil
+}
+
+func (c *iamClient) UpdateTenantMetadata(ctx context.Context, tenantID uuid.UUID, metadata json.RawMessage) (*Tenant, error) {
+	return c.UpdateTenant(ctx, tenantID, UpdateTenantInput{Metadata: metadata})
 }
 
 // Members:
