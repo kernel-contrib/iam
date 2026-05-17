@@ -2,11 +2,10 @@ package iam
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 )
 
 // ── Cache TTLs ────────────────────────────────────────────────────────────────
@@ -69,80 +68,64 @@ type IAMReader interface {
 // ── Implementation ────────────────────────────────────────────────────────────
 
 // iamReader is the unexported implementation registered with the kernel.
-// It wraps the repository for DB access, the RoleService for RBAC
-// resolution, and the SDK Redis client for caching.
+// It embeds *iamClient to delegate shared read methods (GetTenant,
+// ResolvePermissions, HasPermission, GetUserAccess, GetAllowedProviders)
+// and only overrides methods where the reader interface differs from
+// the client (e.g. GetUserByID vs GetUser, GetMember by user+tenant).
 //
 // The embedded iamRegistrar provides write operations (CreateOrganization,
 // Register) so that a single RegisterReader call satisfies both
 // IAMReader and IAMRegistrar interfaces via Go's implicit composition.
 type iamReader struct {
 	*iamRegistrar
-	repo  *Repository
-	roles *RoleService
-	redis sdk.NamespacedRedis
+	*iamClient
 }
 
-// ── Users ─────────────────────────────────────────────────────────────────────
+// ── Users (reader-specific signatures) ────────────────────────────────────────
 
+// GetUserByID delegates to the client's GetUser method.
+// The reader exposes GetUserByID while the client exposes GetUser.
 func (r *iamReader) GetUserByID(ctx context.Context, userID uuid.UUID) (*User, error) {
-	if r.redis.Client() == nil {
-		return r.repo.FindUserByID(ctx, userID)
-	}
-	return sdk.Cache(ctx, r.redis, "user:"+userID.String(), cacheUserTTL, func() (*User, error) {
-		return r.repo.FindUserByID(ctx, userID)
-	})
+	return r.iamClient.GetUser(ctx, userID)
 }
 
+// GetUserByProviderID delegates to the client.
 func (r *iamReader) GetUserByProviderID(ctx context.Context, providerID, provider string) (*User, error) {
-	if r.redis.Client() == nil {
-		return r.repo.FindUserByProviderID(ctx, providerID, provider)
-	}
-	return sdk.Cache(ctx, r.redis, "user:ext:"+provider+":"+providerID, cacheUserTTL, func() (*User, error) {
-		return r.repo.FindUserByProviderID(ctx, providerID, provider)
-	})
+	return r.iamClient.GetUserByProviderID(ctx, providerID, provider)
 }
 
-// ── Tenants ───────────────────────────────────────────────────────────────────
-
-func (r *iamReader) GetTenant(ctx context.Context, tenantID uuid.UUID) (*Tenant, error) {
-	if r.redis.Client() == nil {
-		return r.repo.FindTenantByID(ctx, tenantID)
-	}
-	return sdk.Cache(ctx, r.redis, "tenant:"+tenantID.String(), cacheTenantTTL, func() (*Tenant, error) {
-		return r.repo.FindTenantByID(ctx, tenantID)
-	})
-}
+// ── Tenants (reader-specific signatures) ──────────────────────────────────────
 
 func (r *iamReader) GetTenantAncestors(ctx context.Context, tenantID uuid.UUID) ([]Tenant, error) {
-	return r.repo.FindTenantAncestors(ctx, tenantID)
+	return r.iamClient.GetTenantAncestors(ctx, tenantID)
 }
 
 func (r *iamReader) GetTenantChildren(ctx context.Context, parentID uuid.UUID) ([]Tenant, error) {
-	return r.repo.FindTenantChildren(ctx, parentID)
+	return r.iamClient.repo.FindTenantChildren(ctx, parentID)
 }
 
 func (r *iamReader) GetOrgForTenant(ctx context.Context, tenantID uuid.UUID) (*Tenant, error) {
-	return r.repo.FindOrgForTenant(ctx, tenantID)
+	return r.iamClient.GetOrgForTenant(ctx, tenantID)
 }
 
-// ── Members ───────────────────────────────────────────────────────────────────
+// ── Members (reader-specific: keyed by user+tenant, not member ID) ────────────
 
 func (r *iamReader) GetMember(ctx context.Context, userID, tenantID uuid.UUID) (*TenantMember, error) {
-	if r.redis.Client() == nil {
-		return r.repo.FindMemberByUserAndTenant(ctx, userID, tenantID)
+	if r.iamClient.redis.Client() == nil {
+		return r.iamClient.repo.FindMemberByUserAndTenant(ctx, userID, tenantID)
 	}
 	key := "member:" + userID.String() + ":" + tenantID.String()
-	return sdk.Cache(ctx, r.redis, key, cacheMemberTTL, func() (*TenantMember, error) {
-		return r.repo.FindMemberByUserAndTenant(ctx, userID, tenantID)
+	return sdk.Cache(ctx, r.iamClient.redis, key, cacheMemberTTL, func() (*TenantMember, error) {
+		return r.iamClient.repo.FindMemberByUserAndTenant(ctx, userID, tenantID)
 	})
 }
 
 func (r *iamReader) GetMembersByIDs(ctx context.Context, tenantID uuid.UUID, memberIDs []uuid.UUID) (map[uuid.UUID]TenantMember, error) {
-	return r.repo.FindMembersByIDs(ctx, tenantID, memberIDs)
+	return r.iamClient.repo.FindMembersByIDs(ctx, tenantID, memberIDs)
 }
 
 func (r *iamReader) SearchMembersByName(ctx context.Context, tenantID uuid.UUID, query string) ([]uuid.UUID, error) {
-	return r.repo.SearchMembersByName(ctx, tenantID, query)
+	return r.iamClient.repo.SearchMembersByName(ctx, tenantID, query)
 }
 
 func (r *iamReader) IsMember(ctx context.Context, userID, tenantID uuid.UUID) (bool, error) {
@@ -157,79 +140,5 @@ func (r *iamReader) IsMember(ctx context.Context, userID, tenantID uuid.UUID) (b
 }
 
 func (r *iamReader) IsMemberAnywhere(ctx context.Context, userID, tenantID uuid.UUID) (bool, error) {
-	_, err := r.repo.FindMemberInAncestorChain(ctx, userID, tenantID)
-	if isNotFoundErr(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// ── Permissions ───────────────────────────────────────────────────────────────
-
-func (r *iamReader) ResolvePermissions(ctx context.Context, userID, tenantID uuid.UUID) ([]string, error) {
-	if r.redis.Client() == nil {
-		return r.roles.ResolvePermissions(ctx, userID, tenantID)
-	}
-	key := "perms:" + userID.String() + ":" + tenantID.String()
-	return sdk.Cache(ctx, r.redis, key, cachePermissionTTL, func() ([]string, error) {
-		return r.roles.ResolvePermissions(ctx, userID, tenantID)
-	})
-}
-
-func (r *iamReader) HasPermission(ctx context.Context, userID, tenantID uuid.UUID, perm string) (bool, error) {
-	perms, err := r.ResolvePermissions(ctx, userID, tenantID)
-	if err != nil {
-		return false, err
-	}
-	for _, p := range perms {
-		if p == "*" || p == perm {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// ── Aggregation ───────────────────────────────────────────────────────────────
-
-func (r *iamReader) GetUserAccess(ctx context.Context, userID uuid.UUID) ([]TenantAccess, error) {
-	members, err := r.repo.ListMembershipsByUser(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("iam: get user access: %w", err)
-	}
-
-	result := make([]TenantAccess, 0, len(members))
-	for _, mem := range members {
-		roles, err := r.roles.GetMemberRoles(ctx, mem.ID)
-		if err != nil {
-			return nil, fmt.Errorf("iam: get user access roles: %w", err)
-		}
-
-		perms, err := r.ResolvePermissions(ctx, userID, mem.TenantID)
-		if err != nil {
-			return nil, fmt.Errorf("iam: get user access permissions: %w", err)
-		}
-
-		result = append(result, TenantAccess{
-			TenantMember: mem,
-			Roles:        roles,
-			Permissions:  perms,
-		})
-	}
-
-	return result, nil
-}
-
-// ── Auth Providers ────────────────────────────────────────────────────────────
-
-func (r *iamReader) GetAllowedProviders(ctx context.Context, tenantID uuid.UUID) ([]string, error) {
-	if r.redis.Client() == nil {
-		return r.repo.ListEnabledProviders(ctx, tenantID)
-	}
-	key := "authcfg:" + tenantID.String()
-	return sdk.Cache(ctx, r.redis, key, cacheAuthCfgTTL, func() ([]string, error) {
-		return r.repo.ListEnabledProviders(ctx, tenantID)
-	})
+	return r.iamClient.IsMemberAnywhere(ctx, userID, tenantID)
 }

@@ -1,9 +1,9 @@
 package iam
 
 import (
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 )
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -29,17 +29,18 @@ type assignRoleRequest struct {
 
 // ── Role handlers (tenant-scoped) ─────────────────────────────────────────────
 
-// handleListRoles returns all roles defined for the current tenant.
+// handleListRoles returns a paginated list of roles for the current tenant.
 func (m *Module) handleListRoles(c *gin.Context) {
 	tid := tenantID(c)
+	page := sdk.ParsePageRequest(c)
 
-	roles, err := m.roles.ListByTenant(c.Request.Context(), tid)
+	result, err := m.repo.ListRolesByTenant(c.Request.Context(), tid, page)
 	if err != nil {
 		sdk.FromError(c, err)
 		return
 	}
 
-	sdk.OK(c, roles)
+	sdk.List(c, result.Items, result.Meta)
 }
 
 // handleCreateRole creates a new custom role in the current tenant.
@@ -171,9 +172,23 @@ func (m *Module) handleSetRolePermissions(c *gin.Context) {
 }
 
 // handleGetRolePermissions returns the permissions for a role.
+// Verifies the role belongs to the current tenant or is a global system role.
 func (m *Module) handleGetRolePermissions(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
+		return
+	}
+
+	role, err := m.roles.GetByID(c.Request.Context(), id)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	// Allow access to global system roles (tenant_id = nil) or roles owned by this tenant.
+	tid := tenantID(c)
+	if role.TenantID != nil && *role.TenantID != tid {
+		sdk.Error(c, sdk.NotFound("role", id))
 		return
 	}
 
@@ -214,7 +229,7 @@ func (m *Module) handleAssignRole(c *gin.Context) {
 		},
 	})
 
-	sdk.NoContent(c)
+	sdk.Created(c, nil)
 }
 
 // handleRevokeRole removes a role from a member.
@@ -258,10 +273,8 @@ func (m *Module) handleGetMemberRoles(c *gin.Context) {
 	sdk.OK(c, roles)
 }
 
-// handleListPermissions returns the catalog of all available permissions.
-// TODO: Once the SDK exposes ctx.ListPermissions() for cross-module catalogs,
-// use that instead of only returning the IAM module's own permissions.
+// handleListPermissions returns the catalog of all available permissions
+// across all registered modules.
 func (m *Module) handleListPermissions(c *gin.Context) {
-	manifest := m.Manifest()
-	sdk.OK(c, manifest.Permissions)
+	sdk.OK(c, m.ctx.AllPermissions())
 }

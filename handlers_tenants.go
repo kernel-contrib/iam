@@ -3,9 +3,9 @@ package iam
 import (
 	"fmt"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 )
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -82,17 +82,18 @@ func (m *Module) handleDeleteTenant(c *gin.Context) {
 
 // ── Branch (child tenant) handlers ────────────────────────────────────────────
 
-// handleListChildren returns branches under the current tenant.
+// handleListChildren returns a paginated list of branches under the current tenant.
 func (m *Module) handleListChildren(c *gin.Context) {
 	tid := tenantID(c)
+	page := sdk.ParsePageRequest(c)
 
-	children, err := m.tenants.ListChildren(c.Request.Context(), tid)
+	result, err := m.repo.ListTenantChildren(c.Request.Context(), tid, page)
 	if err != nil {
 		sdk.FromError(c, err)
 		return
 	}
 
-	sdk.OK(c, children)
+	sdk.List(c, result.Items, result.Meta)
 }
 
 // handleCreateBranch creates a new branch under the current tenant (org).
@@ -141,6 +142,11 @@ func (m *Module) handleGetBranch(c *gin.Context) {
 		return
 	}
 
+	if branch.ParentID == nil || *branch.ParentID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("branch", id))
+		return
+	}
+
 	sdk.OK(c, branch)
 }
 
@@ -148,6 +154,17 @@ func (m *Module) handleGetBranch(c *gin.Context) {
 func (m *Module) handleUpdateBranch(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
+		return
+	}
+
+	// Verify this branch belongs to the current tenant.
+	existing, err := m.tenants.GetByID(c.Request.Context(), id)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+	if existing.ParentID == nil || *existing.ParentID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("branch", id))
 		return
 	}
 
@@ -178,6 +195,17 @@ func (m *Module) handleUpdateBranch(c *gin.Context) {
 func (m *Module) handleDeleteBranch(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
+		return
+	}
+
+	// Verify this branch belongs to the current tenant.
+	existing, err := m.tenants.GetByID(c.Request.Context(), id)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+	if existing.ParentID == nil || *existing.ParentID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("branch", id))
 		return
 	}
 

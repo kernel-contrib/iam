@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
+	"github.com/kernel-contrib/sdk"
 	"gorm.io/gorm"
 )
 
@@ -115,6 +115,14 @@ func (r *Repository) FindTenantChildren(ctx context.Context, parentID uuid.UUID)
 		return nil, fmt.Errorf("iam: find tenant children: %w", err)
 	}
 	return children, nil
+}
+
+// ListTenantChildren returns a paginated list of direct child tenants.
+func (r *Repository) ListTenantChildren(ctx context.Context, parentID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[Tenant], error) {
+	return sdk.Paginate[Tenant](
+		r.db.WithContext(ctx).Model(&Tenant{}).Where("parent_id = ?", parentID),
+		page,
+	)
 }
 
 // FindTenantAncestors returns all ancestors of a tenant by querying the
@@ -340,6 +348,26 @@ func (r *Repository) FindMemberInAncestorChain(ctx context.Context, userID, tena
 	return &best, nil
 }
 
+// FindMembershipsByUserAndTenants returns all active memberships for the given
+// user across the specified tenant IDs in a single query. The result is keyed
+// by tenant ID for O(1) lookup. Used by ResolvePermissions to avoid N+1.
+func (r *Repository) FindMembershipsByUserAndTenants(ctx context.Context, userID uuid.UUID, tenantIDs []uuid.UUID) (map[uuid.UUID]*TenantMember, error) {
+	if len(tenantIDs) == 0 {
+		return map[uuid.UUID]*TenantMember{}, nil
+	}
+	var members []TenantMember
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND tenant_id IN ?", userID, tenantIDs).
+		Find(&members).Error; err != nil {
+		return nil, fmt.Errorf("iam: find memberships by user and tenants: %w", err)
+	}
+	result := make(map[uuid.UUID]*TenantMember, len(members))
+	for i := range members {
+		result[members[i].TenantID] = &members[i]
+	}
+	return result, nil
+}
+
 // ── Roles ─────────────────────────────────────────────────────────────────────
 
 func (r *Repository) FindRoleByID(ctx context.Context, id uuid.UUID) (*Role, error) {
@@ -353,7 +381,7 @@ func (r *Repository) FindRoleByID(ctx context.Context, id uuid.UUID) (*Role, err
 func (r *Repository) FindRolesByTenant(ctx context.Context, tenantID uuid.UUID) ([]Role, error) {
 	var roles []Role
 	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
+		Where("tenant_id = ? OR (tenant_id IS NULL AND is_system = true)", tenantID).
 		Preload("Permissions").
 		Find(&roles).Error; err != nil {
 		return nil, fmt.Errorf("iam: find roles by tenant: %w", err)
@@ -361,10 +389,22 @@ func (r *Repository) FindRolesByTenant(ctx context.Context, tenantID uuid.UUID) 
 	return roles, nil
 }
 
-func (r *Repository) FindSystemRoles(ctx context.Context, tenantID uuid.UUID) ([]Role, error) {
+// ListRolesByTenant returns a paginated list of roles visible to a tenant
+// (both tenant-scoped custom roles and global system roles).
+func (r *Repository) ListRolesByTenant(ctx context.Context, tenantID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[Role], error) {
+	return sdk.Paginate[Role](
+		r.db.WithContext(ctx).
+			Model(&Role{}).
+			Where("tenant_id = ? OR (tenant_id IS NULL AND is_system = true)", tenantID).
+			Preload("Permissions"),
+		page,
+	)
+}
+
+func (r *Repository) FindSystemRoles(ctx context.Context) ([]Role, error) {
 	var roles []Role
 	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND is_system = ?", tenantID, true).
+		Where("tenant_id IS NULL AND is_system = true").
 		Preload("Permissions").
 		Find(&roles).Error; err != nil {
 		return nil, fmt.Errorf("iam: find system roles: %w", err)
@@ -372,8 +412,20 @@ func (r *Repository) FindSystemRoles(ctx context.Context, tenantID uuid.UUID) ([
 	return roles, nil
 }
 
-// FindRoleBySlugAndTenant looks up a role by its slug within a specific tenant.
-// Used during idempotent provisioning to find pre-existing system roles.
+// FindSystemRoleBySlug returns a global system role by slug.
+// System roles have tenant_id = NULL and is_system = true.
+func (r *Repository) FindSystemRoleBySlug(ctx context.Context, slug string) (*Role, error) {
+	var role Role
+	if err := r.db.WithContext(ctx).
+		Where("slug = ? AND tenant_id IS NULL AND is_system = true", slug).
+		Preload("Permissions").
+		First(&role).Error; err != nil {
+		return nil, fmt.Errorf("iam: find system role by slug: %w", err)
+	}
+	return &role, nil
+}
+
+// FindRoleBySlugAndTenant looks up a custom (tenant-scoped) role by its slug.
 func (r *Repository) FindRoleBySlugAndTenant(ctx context.Context, slug string, tenantID uuid.UUID) (*Role, error) {
 	var role Role
 	if err := r.db.WithContext(ctx).

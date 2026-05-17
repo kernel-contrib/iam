@@ -1,7 +1,7 @@
 package iam
 
 import (
-	"github.com/edgescaleDev/kernel/sdk"
+	"github.com/kernel-contrib/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -66,6 +66,7 @@ func (m *Module) handleCreateInvitation(c *gin.Context) {
 }
 
 // handleGetInvitation returns a specific invitation by ID.
+// Verifies the invitation belongs to the current tenant context.
 func (m *Module) handleGetInvitation(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
@@ -75,6 +76,11 @@ func (m *Module) handleGetInvitation(c *gin.Context) {
 	inv, err := m.invitations.GetByID(c.Request.Context(), id)
 	if err != nil {
 		sdk.FromError(c, err)
+		return
+	}
+
+	if inv.TenantID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("invitation", id))
 		return
 	}
 
@@ -115,7 +121,7 @@ type invitationTokenRequest struct {
 // (tenant name, role, inviter) so the frontend can show a confirmation screen.
 func (m *Module) handlePreviewInvitation(c *gin.Context) {
 	uid := userID(c)
-	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+	if uid == uuid.Nil {
 		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
 		return
 	}
@@ -144,7 +150,7 @@ func (m *Module) handlePreviewInvitation(c *gin.Context) {
 // the tenant and role -- the client only needs to supply the token.
 func (m *Module) handleAcceptInvitation(c *gin.Context) {
 	uid := userID(c)
-	if uid.String() == "00000000-0000-0000-0000-000000000000" {
+	if uid == uuid.Nil {
 		sdk.Error(c, sdk.Unauthorized("user not registered; call POST /register first"))
 		return
 	}

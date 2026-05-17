@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/edgescaleDev/kernel/sdk"
+	"github.com/kernel-contrib/sdk"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -118,16 +118,19 @@ func (m *TenantMember) BeforeCreate(_ *gorm.DB) error {
 
 // ── Role ──────────────────────────────────────────────────────────────────────
 
-// Role defines a named set of permissions within a tenant.
-// System roles (is_system=true) are seeded during provisioning and cannot
+// Role defines a named set of permissions.
+//
+// Tenant-scoped roles (custom): TenantID is set, owned by a single tenant.
+// Global system roles: TenantID is nil, shared across all tenants.
+// System roles (is_system=true) are managed by the platform and cannot
 // be modified or deleted by tenant admins.
 type Role struct {
 	sdk.BaseModel
-	TenantID    uuid.UUID `json:"tenant_id"   gorm:"type:uuid;not null"`
-	Name        string    `json:"name"        gorm:"not null"`
-	Slug        string    `json:"slug"        gorm:"not null"`
-	Description *string   `json:"description,omitempty"`
-	IsSystem    bool      `json:"is_system"   gorm:"not null;default:false"`
+	TenantID    *uuid.UUID `json:"tenant_id,omitempty" gorm:"type:uuid"`
+	Name        string     `json:"name"                gorm:"not null"`
+	Slug        string     `json:"slug"                gorm:"not null"`
+	Description *string    `json:"description,omitempty"`
+	IsSystem    bool       `json:"is_system"           gorm:"not null;default:false"`
 
 	// Associations
 	Permissions []RolePermission `json:"permissions,omitempty" gorm:"foreignKey:RoleID"`

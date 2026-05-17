@@ -6,14 +6,15 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/migrations"
+	"github.com/kernel-contrib/sdk"
 )
 
 // Module is the EdgeScale Kernel core module for Identity and Access Management.
 // It manages users, tenants (platform → org → branch), memberships, roles,
 // permissions, and invitations.
+
 // platformCacheKey is the Redis key used to cache the platform tenant ID.
 const platformCacheKey = "platform_tenant_id"
 
@@ -31,6 +32,7 @@ type Module struct {
 	roles        *RoleService
 	invitations  *InvitationService
 	registration *RegistrationService
+	client       *iamClient
 }
 
 // New constructs the IAM module.
@@ -49,20 +51,19 @@ func (m *Module) Manifest() sdk.Manifest {
 		Version:     "1.0.0",
 
 		Permissions: []sdk.Permission{
-			// Tenants
-			{Key: "iam.tenants.read", Label: sdk.T("View tenant details", "ar", "عرض تفاصيل المستأجر")},
-			{Key: "iam.tenants.manage", Label: sdk.T("Create, update, and delete tenants", "ar", "إنشاء وتعديل وحذف المستأجرين")},
-			// Members
-			{Key: "iam.members.read", Label: sdk.T("View members", "ar", "عرض الأعضاء")},
-			{Key: "iam.members.manage", Label: sdk.T("Add, update, and remove members", "ar", "إضافة وتعديل وإزالة الأعضاء")},
-			// Roles
-			{Key: "iam.roles.read", Label: sdk.T("View roles", "ar", "عرض الأدوار")},
-			{Key: "iam.roles.manage", Label: sdk.T("Create, update, and delete roles", "ar", "إنشاء وتعديل وحذف الأدوار")},
-			// Invitations
-			{Key: "iam.invitations.read", Label: sdk.T("View invitations", "ar", "عرض الدعوات")},
-			{Key: "iam.invitations.manage", Label: sdk.T("Create and revoke invitations", "ar", "إنشاء وإلغاء الدعوات")},
-			// Permissions catalog
-			{Key: "iam.permissions.read", Label: sdk.T("View permissions catalog", "ar", "عرض كتالوج الصلاحيات")},
+			// Simplified keys (preferred for new code).
+			{Key: PermRead, Label: sdk.T("View IAM resources", "ar", "عرض موارد الهوية"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermWrite, Label: sdk.T("Manage IAM resources", "ar", "إدارة موارد الهوية"), DefaultRoles: []string{sdk.RoleManager}},
+			// Legacy keys (kept for 3-5 releases).
+			{Key: PermTenantsRead, Label: sdk.T("View tenant details", "ar", "عرض تفاصيل المستأجر"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermTenantsManage, Label: sdk.T("Create, update, and delete tenants", "ar", "إنشاء وتعديل وحذف المستأجرين"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermMembersRead, Label: sdk.T("View members", "ar", "عرض الأعضاء"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermMembersManage, Label: sdk.T("Add, update, and remove members", "ar", "إضافة وتعديل وإزالة الأعضاء"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermRolesRead, Label: sdk.T("View roles", "ar", "عرض الأدوار"), DefaultRoles: []string{sdk.RoleManager, sdk.RoleMember}},
+			{Key: PermRolesManage, Label: sdk.T("Create, update, and delete roles", "ar", "إنشاء وتعديل وحذف الأدوار"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermInvitationsRead, Label: sdk.T("View invitations", "ar", "عرض الدعوات"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermInvitationsManage, Label: sdk.T("Create and revoke invitations", "ar", "إنشاء وإلغاء الدعوات"), DefaultRoles: []string{sdk.RoleManager}},
+			{Key: PermPermissionsRead, Label: sdk.T("View permissions catalog", "ar", "عرض كتالوج الصلاحيات"), DefaultRoles: []string{sdk.RoleManager}},
 		},
 
 		PublicEvents: []sdk.EventDef{
@@ -77,6 +78,7 @@ func (m *Module) Manifest() sdk.Manifest {
 			{Subject: "iam.tenant.deleted", Description: sdk.T("A tenant was deactivated")},
 			// Members
 			{Subject: "iam.member.added", Description: sdk.T("A member was added to a tenant")},
+			{Subject: "iam.member.updated", Description: sdk.T("A member's status was updated")},
 			{Subject: "iam.member.removed", Description: sdk.T("A member was removed from a tenant")},
 			// Roles
 			{Subject: "iam.role.created", Description: sdk.T("A role was created")},
@@ -109,9 +111,9 @@ func (m *Module) Manifest() sdk.Manifest {
 		},
 
 		UINav: []sdk.NavItem{
-			{Label: sdk.T("Members", "ar", "الأعضاء"), Icon: "users", Path: "/iam/members", Permission: "iam.members.read", SortOrder: 1},
-			{Label: sdk.T("Roles", "ar", "الأدوار"), Icon: "shield", Path: "/iam/roles", Permission: "iam.roles.read", SortOrder: 2},
-			{Label: sdk.T("Invitations", "ar", "الدعوات"), Icon: "mail", Path: "/iam/invitations", Permission: "iam.invitations.read", SortOrder: 3},
+			{Label: sdk.T("Members", "ar", "الأعضاء"), Icon: "users", Path: "/iam/members", Permission: PermRead, SortOrder: 1},
+			{Label: sdk.T("Roles", "ar", "الأدوار"), Icon: "shield", Path: "/iam/roles", Permission: PermRead, SortOrder: 2},
+			{Label: sdk.T("Invitations", "ar", "الدعوات"), Icon: "mail", Path: "/iam/invitations", Permission: PermRead, SortOrder: 3},
 		},
 	}
 }
@@ -134,19 +136,43 @@ func (m *Module) Init(ctx sdk.Context) error {
 	m.invitations = NewInvitationService(m.repo, ctx.Bus, ctx.Logger)
 	m.registration = NewRegistrationService(
 		m.users, m.tenants, m.members, m.roles, m.invitations,
-		m.seedSystemRoles, // shared provisioning logic (provision.go)
+		m.repo, // used to look up global system roles
 		ctx.DB, ctx.Bus, ctx.Redis, ctx.Logger,
 	)
 
-	// Register the reader for cross-module consumption.
+	// Construct the unified client first (used by both reader and cross-module consumers).
+	m.client = &iamClient{
+		users:        m.users,
+		tenants:      m.tenants,
+		members:      m.members,
+		roles:        m.roles,
+		invitations:  m.invitations,
+		registration: m.registration,
+		repo:         m.repo,
+		redis:        ctx.Redis,
+		audit:        ctx.Audit,
+		db:           ctx.DB,
+	}
+
+	// Register the reader for cross-module consumption (legacy).
 	// Other modules resolve reads via: sdk.Reader[iam.IAMReader](&m.ctx, "iam")
 	// Other modules resolve writes via: sdk.Reader[iam.IAMRegistrar](&m.ctx, "iam")
 	ctx.RegisterReader(&iamReader{
 		iamRegistrar: &iamRegistrar{registration: m.registration},
-		repo:         m.repo,
-		roles:        m.roles,
-		redis:        ctx.Redis,
+		iamClient:    m.client,
 	})
+
+	// Register the unified client for new cross-module consumers.
+	// Resolved via: sdk.Client[iam.IAMClient](&m.ctx, "iam")
+	ctx.RegisterClient(m.client)
+
+	// Reconcile global system role permissions with the latest module
+	// manifests. This ensures new permissions from newly deployed modules
+	// are added, and stale permissions from removed modules are pruned.
+	// Touches only 3 role rows regardless of tenant count.
+	if err := m.reconcileSystemRoles(context.Background()); err != nil {
+		return fmt.Errorf("iam: reconcile system roles: %w", err)
+	}
 
 	ctx.Logger.Info("iam module initialized")
 	return nil
@@ -227,7 +253,7 @@ func (m *Module) ResolveUser(ctx context.Context, provider, externalID string, t
 		return nil, nil
 	}
 
-	perms, err := m.roles.ResolvePermissions(ctx, user.ID, tenantID)
+	perms, err := m.client.ResolvePermissions(ctx, user.ID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +270,9 @@ func (m *Module) ResolveUser(ctx context.Context, provider, externalID string, t
 func (m *Module) ResolveAdmin(ctx context.Context, provider, externalID string) (*sdk.ResolvedUser, error) {
 	user, err := m.repo.FindUserByProviderID(ctx, externalID, provider)
 	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

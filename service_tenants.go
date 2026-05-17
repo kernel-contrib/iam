@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/edgescaleDev/kernel/sdk"
 	"github.com/google/uuid"
 	"github.com/kernel-contrib/iam/types"
+	"github.com/kernel-contrib/sdk"
 )
 
 // TenantService provides business logic for tenant hierarchy operations.
@@ -236,13 +236,13 @@ func (s *TenantService) Deactivate(ctx context.Context, id uuid.UUID) error {
 		}
 	}
 
-	// Cascade deactivate children first.
+	// Cascade deactivate children recursively (handles grandchildren).
 	children, err := s.repo.FindTenantChildren(ctx, id)
 	if err != nil {
 		return err
 	}
 	for _, child := range children {
-		if err := s.repo.SoftDeleteTenant(ctx, child.ID); err != nil {
+		if err := s.Deactivate(ctx, child.ID); err != nil {
 			return fmt.Errorf("iam: cascade deactivate child %s: %w", child.ID, err)
 		}
 	}
