@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/gosimple/slug v1.15.0
-	github.com/kernel-contrib/sdk v0.0.0-20260516224828-d398123b4e71
+	github.com/kernel-contrib/sdk v0.0.0-20260517023559-29dcbf6d1127
 	github.com/stretchr/testify v1.11.1
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
