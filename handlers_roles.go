@@ -171,9 +171,23 @@ func (m *Module) handleSetRolePermissions(c *gin.Context) {
 }
 
 // handleGetRolePermissions returns the permissions for a role.
+// Verifies the role belongs to the current tenant or is a global system role.
 func (m *Module) handleGetRolePermissions(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
+		return
+	}
+
+	role, err := m.roles.GetByID(c.Request.Context(), id)
+	if err != nil {
+		sdk.FromError(c, err)
+		return
+	}
+
+	// Allow access to global system roles (tenant_id = nil) or roles owned by this tenant.
+	tid := tenantID(c)
+	if role.TenantID != nil && *role.TenantID != tid {
+		sdk.Error(c, sdk.NotFound("role", id))
 		return
 	}
 

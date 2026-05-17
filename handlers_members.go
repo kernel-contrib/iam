@@ -63,6 +63,7 @@ func (m *Module) handleAddMember(c *gin.Context) {
 }
 
 // handleGetMember returns a specific member by ID.
+// Verifies the member belongs to the current tenant context.
 func (m *Module) handleGetMember(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
@@ -72,6 +73,11 @@ func (m *Module) handleGetMember(c *gin.Context) {
 	member, err := m.members.GetByID(c.Request.Context(), id)
 	if err != nil {
 		sdk.FromError(c, err)
+		return
+	}
+
+	if member.TenantID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("member", id))
 		return
 	}
 

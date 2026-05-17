@@ -66,6 +66,7 @@ func (m *Module) handleCreateInvitation(c *gin.Context) {
 }
 
 // handleGetInvitation returns a specific invitation by ID.
+// Verifies the invitation belongs to the current tenant context.
 func (m *Module) handleGetInvitation(c *gin.Context) {
 	id, err := parseUUID(c, "id")
 	if err != nil {
@@ -75,6 +76,11 @@ func (m *Module) handleGetInvitation(c *gin.Context) {
 	inv, err := m.invitations.GetByID(c.Request.Context(), id)
 	if err != nil {
 		sdk.FromError(c, err)
+		return
+	}
+
+	if inv.TenantID != tenantID(c) {
+		sdk.Error(c, sdk.NotFound("invitation", id))
 		return
 	}
 

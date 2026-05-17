@@ -239,15 +239,16 @@ func (s *RoleService) AssignToMember(ctx context.Context, memberID, roleID uuid.
 // RevokeFromMember removes a role from a member.
 func (s *RoleService) RevokeFromMember(ctx context.Context, memberID, roleID uuid.UUID) error {
 	// Look up the member to get user/tenant for cache invalidation.
-	member, _ := s.repo.FindMember(ctx, memberID)
+	member, err := s.repo.FindMember(ctx, memberID)
+	if err != nil {
+		return fmt.Errorf("iam: revoke role: find member: %w", err)
+	}
 
 	if err := s.repo.RevokeRole(ctx, memberID, roleID); err != nil {
 		return err
 	}
 
-	if member != nil {
-		s.invalidatePermissions(ctx, member.UserID, member.TenantID)
-	}
+	s.invalidatePermissions(ctx, member.UserID, member.TenantID)
 	return nil
 }
 
