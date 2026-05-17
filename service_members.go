@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/kernel-contrib/sdk"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 )
 
 // MemberService provides business logic for tenant membership operations.
@@ -109,7 +109,19 @@ func (s *MemberService) UpdateStatus(ctx context.Context, id uuid.UUID, status M
 	if isNotFoundErr(err) {
 		return nil, sdk.NotFound("member", id)
 	}
-	return m, err
+	if err != nil {
+		return nil, err
+	}
+
+	s.invalidateMember(ctx, m.UserID, m.TenantID)
+	s.publish(ctx, "iam.member.updated", map[string]any{
+		"member_id": id,
+		"user_id":   m.UserID,
+		"tenant_id": m.TenantID,
+		"status":    status,
+	})
+
+	return m, nil
 }
 
 // Remove deletes a membership and publishes iam.member.removed.

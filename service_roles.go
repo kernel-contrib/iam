@@ -230,9 +230,7 @@ func (s *RoleService) AssignToMember(ctx context.Context, memberID, roleID uuid.
 	}
 
 	// Invalidate the member's permission cache.
-	if member != nil {
-		s.invalidatePermissions(ctx, member.UserID, member.TenantID)
-	}
+	s.invalidatePermissions(ctx, member.UserID, member.TenantID)
 	return nil
 }
 

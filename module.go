@@ -14,6 +14,7 @@ import (
 // Module is the EdgeScale Kernel core module for Identity and Access Management.
 // It manages users, tenants (platform → org → branch), memberships, roles,
 // permissions, and invitations.
+
 // platformCacheKey is the Redis key used to cache the platform tenant ID.
 const platformCacheKey = "platform_tenant_id"
 
@@ -138,18 +139,7 @@ func (m *Module) Init(ctx sdk.Context) error {
 		ctx.DB, ctx.Bus, ctx.Redis, ctx.Logger,
 	)
 
-	// Register the reader for cross-module consumption (legacy).
-	// Other modules resolve reads via: sdk.Reader[iam.IAMReader](&m.ctx, "iam")
-	// Other modules resolve writes via: sdk.Reader[iam.IAMRegistrar](&m.ctx, "iam")
-	ctx.RegisterReader(&iamReader{
-		iamRegistrar: &iamRegistrar{registration: m.registration},
-		repo:         m.repo,
-		roles:        m.roles,
-		redis:        ctx.Redis,
-	})
-
-	// Register the unified client for new cross-module consumers.
-	// Resolved via: sdk.Client[iam.IAMClient](&m.ctx, "iam")
+	// Construct the unified client first (used by both reader and cross-module consumers).
 	m.client = &iamClient{
 		users:        m.users,
 		tenants:      m.tenants,
@@ -162,6 +152,17 @@ func (m *Module) Init(ctx sdk.Context) error {
 		audit:        ctx.Audit,
 		db:           ctx.DB,
 	}
+
+	// Register the reader for cross-module consumption (legacy).
+	// Other modules resolve reads via: sdk.Reader[iam.IAMReader](&m.ctx, "iam")
+	// Other modules resolve writes via: sdk.Reader[iam.IAMRegistrar](&m.ctx, "iam")
+	ctx.RegisterReader(&iamReader{
+		iamRegistrar: &iamRegistrar{registration: m.registration},
+		iamClient:    m.client,
+	})
+
+	// Register the unified client for new cross-module consumers.
+	// Resolved via: sdk.Client[iam.IAMClient](&m.ctx, "iam")
 	ctx.RegisterClient(m.client)
 
 	// Reconcile global system role permissions with the latest module

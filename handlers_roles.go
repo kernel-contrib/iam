@@ -29,17 +29,18 @@ type assignRoleRequest struct {
 
 // ── Role handlers (tenant-scoped) ─────────────────────────────────────────────
 
-// handleListRoles returns all roles defined for the current tenant.
+// handleListRoles returns a paginated list of roles for the current tenant.
 func (m *Module) handleListRoles(c *gin.Context) {
 	tid := tenantID(c)
+	page := sdk.ParsePageRequest(c)
 
-	roles, err := m.roles.ListByTenant(c.Request.Context(), tid)
+	result, err := m.repo.ListRolesByTenant(c.Request.Context(), tid, page)
 	if err != nil {
 		sdk.FromError(c, err)
 		return
 	}
 
-	sdk.OK(c, roles)
+	sdk.List(c, result.Items, result.Meta)
 }
 
 // handleCreateRole creates a new custom role in the current tenant.
@@ -228,7 +229,7 @@ func (m *Module) handleAssignRole(c *gin.Context) {
 		},
 	})
 
-	sdk.NoContent(c)
+	sdk.Created(c, nil)
 }
 
 // handleRevokeRole removes a role from a member.

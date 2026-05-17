@@ -389,6 +389,18 @@ func (r *Repository) FindRolesByTenant(ctx context.Context, tenantID uuid.UUID) 
 	return roles, nil
 }
 
+// ListRolesByTenant returns a paginated list of roles visible to a tenant
+// (both tenant-scoped custom roles and global system roles).
+func (r *Repository) ListRolesByTenant(ctx context.Context, tenantID uuid.UUID, page sdk.PageRequest) (*sdk.PageResult[Role], error) {
+	return sdk.Paginate[Role](
+		r.db.WithContext(ctx).
+			Model(&Role{}).
+			Where("tenant_id = ? OR (tenant_id IS NULL AND is_system = true)", tenantID).
+			Preload("Permissions"),
+		page,
+	)
+}
+
 func (r *Repository) FindSystemRoles(ctx context.Context) ([]Role, error) {
 	var roles []Role
 	if err := r.db.WithContext(ctx).

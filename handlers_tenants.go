@@ -3,9 +3,9 @@ package iam
 import (
 	"fmt"
 
-	"github.com/kernel-contrib/sdk"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/kernel-contrib/sdk"
 )
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -82,17 +82,18 @@ func (m *Module) handleDeleteTenant(c *gin.Context) {
 
 // ── Branch (child tenant) handlers ────────────────────────────────────────────
 
-// handleListChildren returns branches under the current tenant.
+// handleListChildren returns a paginated list of branches under the current tenant.
 func (m *Module) handleListChildren(c *gin.Context) {
 	tid := tenantID(c)
+	page := sdk.ParsePageRequest(c)
 
-	children, err := m.tenants.ListChildren(c.Request.Context(), tid)
+	result, err := m.repo.ListTenantChildren(c.Request.Context(), tid, page)
 	if err != nil {
 		sdk.FromError(c, err)
 		return
 	}
 
-	sdk.OK(c, children)
+	sdk.List(c, result.Items, result.Meta)
 }
 
 // handleCreateBranch creates a new branch under the current tenant (org).
