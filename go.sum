@@ -52,6 +52,8 @@ github.com/kernel-contrib/sdk v0.0.0-20260516221945-d787098a8efd h1:P5whASaZd/FT
 github.com/kernel-contrib/sdk v0.0.0-20260516221945-d787098a8efd/go.mod h1:wCvw2pvr7eGjsw8+Pi1fg0av3ytqZknfRICHXgoI18Y=
 github.com/kernel-contrib/sdk v0.0.0-20260516224828-d398123b4e71 h1:8IQm7zQBQfVFQ7BIMswiLXWcqSmjHe3RDuxv5BPauyo=
 github.com/kernel-contrib/sdk v0.0.0-20260516224828-d398123b4e71/go.mod h1:wCvw2pvr7eGjsw8+Pi1fg0av3ytqZknfRICHXgoI18Y=
+github.com/kernel-contrib/sdk v0.0.0-20260517023559-29dcbf6d1127 h1:5jz/iso9ofS8kji1rVLTTqxT1XyOPwJ+5C77lyE1pPA=
+github.com/kernel-contrib/sdk v0.0.0-20260517023559-29dcbf6d1127/go.mod h1:wCvw2pvr7eGjsw8+Pi1fg0av3ytqZknfRICHXgoI18Y=
 github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
 github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
