@@ -476,20 +476,39 @@ func (c *iamClient) RevokeRole(ctx context.Context, memberID, roleID uuid.UUID) 
 }
 
 func (c *iamClient) SetMemberRole(ctx context.Context, memberID, roleID uuid.UUID) error {
-	return c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		existing, err := c.roles.GetMemberRoles(ctx, memberID)
+	// Look up the member before the transaction so we can invalidate the
+	// permission cache after commit.
+	member, err := c.repo.FindMember(ctx, memberID)
+	if err != nil {
+		return fmt.Errorf("iam: set member role: find member: %w", err)
+	}
+
+	err = c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := NewRepository(tx)
+
+		// 1. Fetch current role assignments within the transaction.
+		existing, err := txRepo.GetMemberRoles(ctx, memberID)
 		if err != nil {
 			return fmt.Errorf("iam: get member roles: %w", err)
 		}
 
+		// 2. Revoke all existing roles.
 		for _, mr := range existing {
-			if err := c.roles.RevokeFromMember(ctx, memberID, mr.RoleID); err != nil {
+			if err := txRepo.RevokeRole(ctx, memberID, mr.RoleID); err != nil {
 				return fmt.Errorf("iam: revoke member role: %w", err)
 			}
 		}
 
-		return c.roles.AssignToMember(ctx, memberID, roleID)
+		// 3. Assign the new role.
+		return txRepo.AssignRole(ctx, memberID, roleID)
 	})
+	if err != nil {
+		return err
+	}
+
+	// Post-commit: invalidate the permission cache for this user+tenant.
+	c.roles.invalidatePermissions(ctx, member.UserID, member.TenantID)
+	return nil
 }
 
 // Permissions:

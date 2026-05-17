@@ -78,6 +78,7 @@ func (m *Module) Manifest() sdk.Manifest {
 			{Subject: "iam.tenant.deleted", Description: sdk.T("A tenant was deactivated")},
 			// Members
 			{Subject: "iam.member.added", Description: sdk.T("A member was added to a tenant")},
+			{Subject: "iam.member.updated", Description: sdk.T("A member's status was updated")},
 			{Subject: "iam.member.removed", Description: sdk.T("A member was removed from a tenant")},
 			// Roles
 			{Subject: "iam.role.created", Description: sdk.T("A role was created")},
