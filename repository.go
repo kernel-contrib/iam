@@ -202,7 +202,7 @@ func (r *Repository) FindOrgForTenant(ctx context.Context, tenantID uuid.UUID) (
 
 func (r *Repository) FindMember(ctx context.Context, id uuid.UUID) (*TenantMember, error) {
 	var m TenantMember
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&m).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ?", id).Preload("User").First(&m).Error; err != nil {
 		return nil, fmt.Errorf("iam: find member: %w", err)
 	}
 	return &m, nil
